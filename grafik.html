@@ -1,0 +1,1772 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<title>Grafik Pracowników – Szpital</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; background: #f4f6f9; color: #222; }
+  header { background: #1e3a5f; color: #fff; padding: 14px 22px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+  header h1 { margin: 0 0 10px 0; font-size: 20px; font-weight: 600; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { background: transparent; color: #cfd8e3; border: none; padding: 10px 18px; cursor: pointer; font-size: 14px; border-radius: 4px 4px 0 0; transition: all .2s; }
+  nav button:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  nav button.active { background: #f4f6f9; color: #1e3a5f; font-weight: 600; }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .panel { background: #fff; border-radius: 6px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 14px 0; font-size: 16px; color: #1e3a5f; border-bottom: 2px solid #e3e8ef; padding-bottom: 8px; }
+  .panel h3 { font-size: 14px; color: #1e3a5f; margin: 16px 0 8px 0; }
+  button.primary { background: #1e3a5f; color: #fff; border: none; padding: 9px 18px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  button.primary:hover { background: #2a4f7a; }
+  button.secondary { background: #fff; color: #1e3a5f; border: 1px solid #1e3a5f; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button.secondary:hover { background: #f0f4f9; }
+  button.danger { background: #c0392b; color: #fff; border: none; padding: 6px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+  button.danger:hover { background: #a93224; }
+  button.success { background: #27ae60; color: #fff; border: none; padding: 9px 18px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  button.success:hover { background: #1e8a4c; }
+  input[type="text"], input[type="number"], input[type="month"], input[type="date"], select { padding: 7px 10px; border: 1px solid #cbd3dd; border-radius: 4px; font-size: 13px; font-family: inherit; }
+  input:focus, select:focus { outline: none; border-color: #1e3a5f; box-shadow: 0 0 0 2px rgba(30,58,95,0.15); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #eef2f7; color: #1e3a5f; padding: 8px 10px; text-align: left; border-bottom: 2px solid #cbd3dd; font-weight: 600; }
+  td { padding: 7px 10px; border-bottom: 1px solid #eef2f7; }
+  tr:hover td { background: #f9fafc; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .field-group { display: flex; align-items: center; gap: 8px; }
+  .field-group label { font-size: 13px; color: #5a6a7e; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge-day { background: #fef3c7; color: #92400e; }
+  .badge-night { background: #1f2a44; color: #fff; }
+  .badge-off { background: #dcfce7; color: #166534; }
+  .badge-holiday { background: #fce7f3; color: #9d174d; }
+  .grafik-table { font-size: 11px; }
+  .grafik-table th, .grafik-table td { padding: 3px 4px; text-align: center; border: 1px solid #d1d9e3; min-width: 28px; }
+  .grafik-table th.sticky, .grafik-table td.sticky { position: sticky; left: 0; background: #fff; z-index: 2; text-align: left; min-width: 160px; padding-left: 10px; }
+  .grafik-table th.sticky { background: #eef2f7; z-index: 3; }
+  .grafik-table .weekend { background: #fff8e1; }
+  .grafik-table .holiday { background: #fce7f3; }
+  .grafik-table .cell-D { background: #fef3c7; color: #92400e; font-weight: 600; }
+  .grafik-table .cell-N { background: #1f2a44; color: #fff; font-weight: 600; }
+  .grafik-table .cell-U { background: #bae6fd; color: #075985; font-weight: 600; }
+  .grafik-table .cell-W { background: #f0f0f0; color: #666; }
+  .grafik-table .cell-P { background: #fee2e2; color: #991b1b; font-weight: 600; }
+  .grafik-table .cell-H { background: #fde68a; color: #78350f; font-weight: 600; font-size: 10px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; font-size: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .sq { display: inline-block; width: 14px; height: 14px; border: 1px solid #d1d9e3; }
+  .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: 10px; }
+  .calendar-grid .dayname { font-size: 11px; font-weight: 600; text-align: center; color: #5a6a7e; padding: 4px; }
+  .calendar-grid .cell { border: 1px solid #d1d9e3; padding: 6px; min-height: 42px; font-size: 12px; cursor: pointer; background: #fff; user-select: none; border-radius: 3px; }
+  .calendar-grid .cell.empty { background: #f4f6f9; border-color: transparent; cursor: default; }
+  .calendar-grid .cell.weekend { background: #fff8e1; }
+  .calendar-grid .cell.holiday { background: #fce7f3; }
+  .calendar-grid .cell.U { background: #bae6fd; color: #075985; font-weight: 600; }
+  .calendar-grid .cell.P { background: #fee2e2; color: #991b1b; font-weight: 600; }
+  .calendar-grid .cell.CD { background: #bbf7d0; color: #166534; font-weight: 600; }
+  .calendar-grid .cell.CN { background: #e9d5ff; color: #6b21a8; font-weight: 600; }
+  .calendar-grid .cell:hover:not(.empty) { outline: 2px solid #1e3a5f; }
+  .stats { display: flex; gap: 14px; flex-wrap: wrap; }
+  .stat-box { flex: 1; min-width: 140px; background: #eef2f7; padding: 10px 14px; border-radius: 4px; border-left: 4px solid #1e3a5f; }
+  .stat-box .label { font-size: 11px; color: #5a6a7e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-box .value { font-size: 18px; font-weight: 600; color: #1e3a5f; margin-top: 2px; }
+  .errors { background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: 4px; border-left: 4px solid #c0392b; margin-bottom: 12px; font-size: 13px; }
+  .warnings { background: #fef3c7; color: #92400e; padding: 10px 14px; border-radius: 4px; border-left: 4px solid #f59e0b; margin-bottom: 12px; font-size: 13px; }
+  .success-msg { background: #dcfce7; color: #166534; padding: 10px 14px; border-radius: 4px; border-left: 4px solid #27ae60; margin-bottom: 12px; font-size: 13px; }
+  .hours-input { width: 80px; text-align: right; }
+  .inline-edit { border: none; background: transparent; width: 100%; font-size: 13px; }
+  .inline-edit:focus { background: #fffbe7; border: 1px solid #f59e0b; }
+  .grafik-scroll { overflow-x: auto; border: 1px solid #d1d9e3; border-radius: 4px; }
+  details { background: #f9fafc; border: 1px solid #e3e8ef; border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; }
+  details summary { cursor: pointer; font-weight: 600; color: #1e3a5f; font-size: 14px; }
+  .modal-bg { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-bg.show { display: flex; }
+  .modal { background: #fff; border-radius: 6px; padding: 22px; width: 480px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+  .modal h3 { margin-top: 0; }
+  .tabs-sub { display: flex; gap: 2px; margin-bottom: 12px; border-bottom: 1px solid #d1d9e3; }
+  .tabs-sub button { background: transparent; border: none; padding: 8px 14px; cursor: pointer; font-size: 13px; color: #5a6a7e; border-bottom: 2px solid transparent; }
+  .tabs-sub button.active { color: #1e3a5f; border-bottom-color: #1e3a5f; font-weight: 600; }
+  .help { font-size: 12px; color: #5a6a7e; margin: 6px 0; font-style: italic; }
+  .worker-stats-table { font-size: 12px; }
+  .worker-stats-table td, .worker-stats-table th { padding: 5px 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Grafik Pracowników – Szpital</h1>
+  <nav>
+    <button data-tab="pracownicy" class="active">Pracownicy</button>
+    <button data-tab="nieobecnosci">Nieobecności / Prośby</button>
+    <button data-tab="ustawienia">Ustawienia</button>
+    <button data-tab="grafik">Grafik</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- =================== PRACOWNICY =================== -->
+<section id="tab-pracownicy" class="tab active">
+  <div class="panel">
+    <h2>Szybkie ustawienie godzin dla wszystkich pracowników</h2>
+    <div id="bulkHoursRow" class="toolbar"></div>
+    <p class="help">Wpisz liczbę godzin (dozwolony przecinek, np. 151,40) i kliknij „Zastosuj". Wartość zostanie ustawiona wszystkim pracownikom dla danego miesiąca (nadpisze istniejące).</p>
+  </div>
+
+  <div class="panel">
+    <h2>Lista pracowników</h2>
+    <div class="toolbar">
+      <button class="primary" onclick="addWorker()">+ Dodaj pracownika</button>
+      <button class="secondary" onclick="addManyWorkers()">+ Dodaj wielu...</button>
+      <div class="field-group" style="margin-left:auto">
+        <label>Liczba pracowników:</label>
+        <strong id="workerCount">0</strong>
+      </div>
+    </div>
+    <p class="help">Zmień imię klikając w komórkę. Godziny ustalane są osobno dla każdego miesiąca (dozwolony przecinek, np. 151,40). Każdy dzień urlopu (U) w dni robocze (pn–pt) zmniejsza pulę godzin o 7,35 h. Urlop w sobotę/niedzielę nie odejmuje godzin. Zaznacz <strong>Tylko D</strong>, jeśli pracownik nie pracuje na nockach.</p>
+    <div style="overflow-x:auto">
+      <table id="workersTable"></table>
+    </div>
+  </div>
+</section>
+
+<!-- =================== NIEOBECNOSCI =================== -->
+<section id="tab-nieobecnosci" class="tab">
+  <div class="panel">
+    <h2>Nieobecności i prośby o wolne</h2>
+    <div class="toolbar">
+      <div class="field-group">
+        <label>Pracownik:</label>
+        <select id="absenceWorkerSelect" onchange="renderAbsenceCalendar()"></select>
+      </div>
+      <div class="field-group">
+        <label>Miesiąc:</label>
+        <input type="month" id="absenceMonth" onchange="renderAbsenceCalendar()">
+      </div>
+      <div class="field-group" style="margin-left:auto">
+        <span class="legend">
+          <span><span class="sq" style="background:#bae6fd"></span> Urlop (U)</span>
+          <span><span class="sq" style="background:#fee2e2"></span> Prośba o wolne (P)</span>
+          <span><span class="sq" style="background:#bbf7d0"></span> Chce dniówkę (CD)</span>
+          <span><span class="sq" style="background:#e9d5ff"></span> Chce nockę (CN)</span>
+          <span><span class="sq" style="background:#fff8e1"></span> Weekend</span>
+          <span><span class="sq" style="background:#fce7f3"></span> Święto</span>
+        </span>
+      </div>
+    </div>
+    <p class="help">Klikaj w dzień, aby przełączać: puste → U (urlop) → P (prośba o wolne) → CD (chce dniówkę) → CN (chce nockę) → puste. <strong>U/P</strong> = pracownik nie pracuje tego dnia. <strong>CD/CN</strong> = pracownik chce konkretną zmianę (algorytm stara się przydzielić D/N, nigdy nie przydzieli zmiany przeciwnej).</p>
+    <div id="absenceCalendar"></div>
+  </div>
+</section>
+
+<!-- =================== USTAWIENIA =================== -->
+<section id="tab-ustawienia" class="tab">
+  <div class="panel">
+    <h2>Parametry grafiku</h2>
+    <div class="toolbar" style="flex-wrap:wrap; gap: 20px">
+      <div class="field-group">
+        <label>Miesiąc startowy:</label>
+        <input type="month" id="startMonth">
+      </div>
+      <div class="field-group">
+        <label>Liczba miesięcy:</label>
+        <input type="number" id="monthsCount" min="1" max="6" value="2" style="width:60px">
+      </div>
+      <div class="field-group">
+        <label>Obsada dzień (cel):</label>
+        <input type="number" id="dayShiftCount" min="1" max="20" value="7" style="width:60px">
+      </div>
+      <div class="field-group">
+        <label>Min. obsada dzień:</label>
+        <input type="number" id="dayShiftMin" min="1" max="20" value="5" style="width:60px">
+      </div>
+      <div class="field-group">
+        <label>Obsada noc (cel):</label>
+        <input type="number" id="nightShiftCount" min="1" max="20" value="4" style="width:60px">
+      </div>
+      <div class="field-group">
+        <label>Min. obsada noc:</label>
+        <input type="number" id="nightShiftMin" min="1" max="20" value="4" style="width:60px">
+      </div>
+      <div class="field-group">
+        <label>Godzin na zmianę:</label>
+        <input type="number" id="shiftHours" min="1" max="24" value="12" style="width:60px">
+      </div>
+    </div>
+    <p class="help">Przy brakach kadrowych algorytm nie dodaje nadgodzin — zamiast tego redukuje obsadę, ale nie poniżej minimum (np. noc min 4, dzień min 5). Jeśli pracownik ma wyrobiony cel godzin, nie zostanie dopisany do zmiany powyżej minimum.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Reguły grafiku</h2>
+    <ul style="font-size:13px; color:#444; line-height: 1.7">
+      <li>Preferowany cykl: <strong>Dzień → Noc → Wolne → Wolne</strong> (lub Dzień → Noc → Wolne)</li>
+      <li><strong>Unikamy dniówki po dniówce</strong> — po D najchętniej N, potem wolne</li>
+      <li>Maksymalnie 2 zmiany pod rząd (dni lub noce)</li>
+      <li>Maksymalnie 2 noce pod rząd</li>
+      <li>Po nocy nie można mieć dnia kolejnej doby (brak 11h odpoczynku) — tylko noc lub wolne</li>
+      <li><strong>Pracownik nie może pracować w sobotę i niedzielę tego samego weekendu</strong> (jedno musi być wolne)</li>
+      <li>Każdy pracownik ma w każdym miesiącu 1 pełny wolny weekend (So+Nd). Jeśli pracownik ma urlop/prośbę w którykolwiek dzień weekendu — warunek uznany za spełniony, nie szukamy drugiego weekendu</li>
+      <li><strong>Max 4 dni wolnego pod rząd</strong> — algorytm unika dłuższych przerw</li>
+      <li><strong>Tylko D</strong> — pracownik oznaczony jako „tylko dniówki" nigdy nie dostaje N</li>
+      <li><strong>Nocki</strong> rozdzielane po równo wśród pracowników, którzy mogą je brać (±1 nocki)</li>
+      <li><strong>Niedziele + święta</strong> (jedna pula D) rozdzielane po równo — bez uwzględnienia nocek</li>
+      <li>Godziny: cel = efektywne godziny z Kodeksu Pracy; pełne 12h + 1 częściowa dniówka (kod <strong>H</strong>) dopełnia brakującą resztę (np. H5 = 5 h na dziennej)</li>
+      <li>Częściowa dniówka wlicza się do limitu 7 osób na D</li>
+      <li>Urlop (U) – twarde wolne (odlicza 7,35 h/dzień w dni robocze), Prośba (P) – wolne</li>
+      <li>CD – chce dniówkę (tylko D lub wolne), CN – chce nockę (tylko N lub wolne)</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h2>Dane</h2>
+    <div class="toolbar">
+      <button class="secondary" onclick="exportData()">Eksportuj dane (JSON)</button>
+      <button class="secondary" onclick="document.getElementById('importFile').click()">Importuj dane (JSON)</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+      <button class="danger" onclick="if(confirm('Czy na pewno wyczyścić wszystkie dane?')) clearAllData()">Wyczyść wszystkie dane</button>
+    </div>
+    <p class="help">Wszystkie dane zapisywane są lokalnie w przeglądarce (localStorage). Wyeksportuj do pliku JSON jako kopię zapasową.</p>
+  </div>
+</section>
+
+<!-- =================== GRAFIK =================== -->
+<section id="tab-grafik" class="tab">
+  <div class="panel">
+    <h2>Generowanie i podgląd grafiku</h2>
+    <div class="toolbar">
+      <button class="primary" onclick="generateSchedule()">Wygeneruj grafik</button>
+      <button class="success" onclick="exportToExcel()">📥 Pobierz Excel</button>
+      <div class="field-group" style="margin-left:auto">
+        <label>Widok:</label>
+        <select id="scheduleView" onchange="renderSchedule()">
+          <option value="month">Miesięczny</option>
+          <option value="week">Tygodniowy</option>
+        </select>
+      </div>
+      <div class="field-group" id="monthSelector" style="display:none">
+        <label>Miesiąc:</label>
+        <select id="scheduleMonth" onchange="renderSchedule()"></select>
+      </div>
+      <div class="field-group" id="weekSelector" style="display:none">
+        <label>Tydzień:</label>
+        <select id="scheduleWeek" onchange="renderSchedule()"></select>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="sq" style="background:#fef3c7"></span> D – dzień (12h)</span>
+      <span><span class="sq" style="background:#fde68a"></span> H# – częściowa D (# godzin)</span>
+      <span><span class="sq" style="background:#1f2a44"></span> N – noc</span>
+      <span><span class="sq" style="background:#bae6fd"></span> U – urlop</span>
+      <span><span class="sq" style="background:#fee2e2"></span> P – prośba o wolne</span>
+      <span><span class="sq" style="background:#bbf7d0"></span> CD – chce dniówkę</span>
+      <span><span class="sq" style="background:#e9d5ff"></span> CN – chce nockę</span>
+      <span><span class="sq" style="background:#f0f0f0"></span> puste – wolne</span>
+      <span><span class="sq" style="background:#fff8e1"></span> weekend</span>
+      <span><span class="sq" style="background:#fce7f3"></span> święto</span>
+    </div>
+    <div id="scheduleMessages"></div>
+    <div id="scheduleContainer"></div>
+  </div>
+
+  <div class="panel" id="statsPanel" style="display:none">
+    <h2>Statystyki pracowników</h2>
+    <div style="overflow-x:auto">
+      <table id="workerStatsTable" class="worker-stats-table"></table>
+    </div>
+  </div>
+
+  <div class="panel" id="coveragePanel" style="display:none">
+    <h2>Obsada dzienna</h2>
+    <div style="overflow-x:auto">
+      <table id="coverageTable" class="worker-stats-table"></table>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script>
+// ================== STATE ==================
+const STORAGE_KEY = 'grafik_szpital_v1';
+let state = {
+  workers: [],
+  settings: {
+    startMonth: ymNow(),
+    monthsCount: 2,
+    dayShiftCount: 7,
+    dayShiftMin: 5,
+    nightShiftCount: 4,
+    nightShiftMin: 4,
+    shiftHours: 12
+  },
+  schedule: null
+};
+let nextWorkerId = 1;
+
+function ymNow() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      state = Object.assign(state, parsed);
+      nextWorkerId = (state.workers.reduce((m,w)=>Math.max(m,w.id),0)) + 1;
+    }
+  } catch(e) { console.warn('Błąd wczytywania danych', e); }
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch(e) { console.warn('Błąd zapisu', e); }
+}
+
+// ================== HELPERS ==================
+function ymdFromDate(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function dateFromYmd(ymd) {
+  const [y,m,d] = ymd.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+function daysInMonth(year, monthIdx) {
+  return new Date(year, monthIdx+1, 0).getDate();
+}
+function ymList(startYm, count) {
+  const [sy, sm] = startYm.split('-').map(Number);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(sy, sm - 1 + i, 1);
+    out.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
+  }
+  return out;
+}
+function datesInMonth(ym) {
+  const [y,m] = ym.split('-').map(Number);
+  const n = daysInMonth(y, m-1);
+  const arr = [];
+  for (let d = 1; d <= n; d++) arr.push(ymdFromDate(new Date(y, m-1, d)));
+  return arr;
+}
+function allDatesInPeriod() {
+  const out = [];
+  ymList(state.settings.startMonth, state.settings.monthsCount).forEach(ym => {
+    datesInMonth(ym).forEach(d => out.push(d));
+  });
+  return out;
+}
+function dayOfWeek(ymd) { // 0=Sun,1=Mon,...6=Sat
+  return dateFromYmd(ymd).getDay();
+}
+function isWeekend(ymd) {
+  const d = dayOfWeek(ymd);
+  return d === 0 || d === 6;
+}
+function isSaturday(ymd) { return dayOfWeek(ymd) === 6; }
+function isSunday(ymd) { return dayOfWeek(ymd) === 0; }
+
+// ============ POLSKIE ŚWIĘTA ============
+function easterDate(year) { // Gregorian Easter
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19*a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const L = (32 + 2*e + 2*i - h - k) % 7;
+  const m = Math.floor((a + 11*h + 22*L) / 451);
+  const month = Math.floor((h + L - 7*m + 114) / 31);
+  const day = ((h + L - 7*m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+function polishHolidays(year) {
+  const easter = easterDate(year);
+  const easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
+  const pentecost = new Date(easter); pentecost.setDate(easter.getDate()+49);
+  const corpus = new Date(easter); corpus.setDate(easter.getDate()+60);
+  return [
+    { date: `${year}-01-01`, name: 'Nowy Rok' },
+    { date: `${year}-01-06`, name: 'Trzech Króli' },
+    { date: ymdFromDate(easter), name: 'Wielkanoc' },
+    { date: ymdFromDate(easterMon), name: 'Poniedziałek Wielkanocny' },
+    { date: `${year}-05-01`, name: 'Święto Pracy' },
+    { date: `${year}-05-03`, name: 'Święto Konstytucji' },
+    { date: ymdFromDate(pentecost), name: 'Zielone Świątki' },
+    { date: ymdFromDate(corpus), name: 'Boże Ciało' },
+    { date: `${year}-08-15`, name: 'Wniebowzięcie NMP' },
+    { date: `${year}-11-01`, name: 'Wszystkich Świętych' },
+    { date: `${year}-11-11`, name: 'Niepodległości' },
+    { date: `${year}-12-24`, name: 'Wigilia' },
+    { date: `${year}-12-25`, name: 'Boże Narodzenie I' },
+    { date: `${year}-12-26`, name: 'Boże Narodzenie II' }
+  ];
+}
+let _holidayCache = {};
+function holidaysForPeriod() {
+  const out = {};
+  const years = new Set();
+  allDatesInPeriod().forEach(d => years.add(d.slice(0,4)));
+  years.forEach(y => {
+    if (!_holidayCache[y]) _holidayCache[y] = polishHolidays(Number(y));
+    _holidayCache[y].forEach(h => out[h.date] = h.name);
+  });
+  return out;
+}
+function isHoliday(ymd) {
+  const h = holidaysForPeriod();
+  return !!h[ymd];
+}
+
+// ================== TABS ==================
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'nieobecnosci') { populateAbsenceWorkerSelect(); renderAbsenceCalendar(); }
+    if (btn.dataset.tab === 'pracownicy') renderWorkersTable();
+    if (btn.dataset.tab === 'grafik') renderSchedule();
+  });
+});
+
+// ================== WORKERS ==================
+function addWorker() {
+  const id = nextWorkerId++;
+  state.workers.push({
+    id,
+    name: String(id),
+    hours: {},
+    absences: {}, // { 'YYYY-MM-DD': 'U' | 'P' | 'CD' | 'CN' }
+    dayOnly: false // pracownik wyłącznie na dniówkach
+  });
+  saveState();
+  renderWorkersTable();
+}
+function addManyWorkers() {
+  const n = parseInt(prompt('Ile pracowników dodać?', '10'));
+  if (!n || n < 1) return;
+  for (let i = 0; i < n; i++) addWorker();
+}
+function removeWorker(id) {
+  if (!confirm('Usunąć tego pracownika?')) return;
+  state.workers = state.workers.filter(w => w.id !== id);
+  saveState();
+  renderWorkersTable();
+}
+function renderWorkersTable() {
+  const months = ymList(state.settings.startMonth, state.settings.monthsCount);
+  const tbl = document.getElementById('workersTable');
+  document.getElementById('workerCount').textContent = state.workers.length;
+  let html = '<thead><tr><th style="width:40px">#</th><th>Imię i nazwisko</th><th style="width:70px" title="Pracownik pracuje wyłącznie na dniówkach (bez nocek)">Tylko D</th>';
+  months.forEach(ym => html += `<th>Godz. ${formatYm(ym)}</th>`);
+  months.forEach(ym => html += `<th title="Godziny efektywne po odliczeniu urlopu">Efekt. ${formatYm(ym)}</th>`);
+  html += '<th style="width:80px">Akcje</th></tr></thead><tbody>';
+  state.workers.forEach((w, idx) => {
+    html += `<tr>
+      <td>${idx+1}</td>
+      <td><input class="inline-edit" value="${escapeHtml(w.name)}" onchange="updateWorkerName(${w.id}, this.value)"></td>
+      <td style="text-align:center"><input type="checkbox" ${w.dayOnly?'checked':''} onchange="updateWorkerDayOnly(${w.id}, this.checked)"></td>`;
+    months.forEach(ym => {
+      const v = w.hours[ym];
+      html += `<td><input type="text" inputmode="decimal" class="hours-input" value="${formatDecimal(v)}" onchange="updateWorkerHours(${w.id}, '${ym}', this.value)"></td>`;
+    });
+    months.forEach(ym => {
+      const eff = effectiveMonthHours(w, ym);
+      const vac = weekdayVacationCount(w, ym);
+      const hint = vac > 0 ? ` (${vac}×${formatDecimal(VACATION_HOURS_PER_DAY)})` : '';
+      html += `<td style="text-align:right;color:#5a6a7e" title="Urlopy w dni robocze: ${vac}">${formatDecimal(Math.round(eff*100)/100)}${hint}</td>`;
+    });
+    html += `<td><button class="danger" onclick="removeWorker(${w.id})">Usuń</button></td></tr>`;
+  });
+  html += '</tbody>';
+  tbl.innerHTML = html;
+  renderBulkHoursRow();
+}
+function renderBulkHoursRow() {
+  const container = document.getElementById('bulkHoursRow');
+  if (!container) return;
+  const months = ymList(state.settings.startMonth, state.settings.monthsCount);
+  let html = '';
+  months.forEach(ym => {
+    html += `<div class="field-group"><label>${formatYm(ym)}:</label><input type="text" inputmode="decimal" id="bulk_${ym}" class="hours-input" placeholder="np. 151,40"></div>`;
+  });
+  html += `<button class="primary" onclick="applyBulkHours()">Zastosuj dla wszystkich</button>`;
+  container.innerHTML = html;
+}
+function applyBulkHours() {
+  const months = ymList(state.settings.startMonth, state.settings.monthsCount);
+  let changed = 0;
+  months.forEach(ym => {
+    const input = document.getElementById('bulk_' + ym);
+    const raw = input ? input.value.trim() : '';
+    if (!raw) return;
+    const n = parseDecimal(raw);
+    state.workers.forEach(w => {
+      if (n > 0) w.hours[ym] = n;
+      else delete w.hours[ym];
+      changed++;
+    });
+    input.value = '';
+  });
+  if (changed === 0) { alert('Wpisz wartość w co najmniej jednym miesiącu.'); return; }
+  saveState();
+  renderWorkersTable();
+}
+function updateWorkerName(id, name) {
+  const w = state.workers.find(x => x.id === id);
+  if (w) { w.name = name.trim() || String(id); saveState(); }
+}
+function updateWorkerDayOnly(id, value) {
+  const w = state.workers.find(x => x.id === id);
+  if (!w) return;
+  w.dayOnly = !!value;
+  saveState();
+}
+function updateWorkerHours(id, ym, value) {
+  const w = state.workers.find(x => x.id === id);
+  if (!w) return;
+  const n = parseDecimal(value);
+  if (!n || n <= 0) delete w.hours[ym];
+  else w.hours[ym] = n;
+  saveState();
+  renderWorkersTable();
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function parseDecimal(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return v;
+  const s = String(v).replace(',', '.').trim();
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function formatDecimal(n) {
+  if (n === null || n === undefined || n === '' || n === 0) return '';
+  return String(n).replace('.', ',');
+}
+const VACATION_HOURS_PER_DAY = 7.35;
+function weekdayVacationCount(worker, ym) {
+  let count = 0;
+  Object.entries(worker.absences || {}).forEach(([ymd, type]) => {
+    if (type !== 'U') return;
+    if (!ymd.startsWith(ym)) return;
+    if (isWeekend(ymd)) return;
+    count++;
+  });
+  return count;
+}
+function effectiveMonthHours(worker, ym) {
+  const base = worker.hours[ym] || 0;
+  if (!base) return 0;
+  const deduction = weekdayVacationCount(worker, ym) * VACATION_HOURS_PER_DAY;
+  return Math.max(0, base - deduction);
+}
+function formatYm(ym) {
+  const [y,m] = ym.split('-').map(Number);
+  const names = ['stycz.','lut.','marz.','kwiec.','maj','czerw.','lip.','sierp.','wrz.','paź.','list.','grudz.'];
+  return names[m-1] + ' ' + y;
+}
+
+// ================== ABSENCES ==================
+function populateAbsenceWorkerSelect() {
+  const sel = document.getElementById('absenceWorkerSelect');
+  const cur = sel.value;
+  sel.innerHTML = state.workers.map(w => `<option value="${w.id}">${escapeHtml(w.name)}</option>`).join('');
+  if (cur) sel.value = cur;
+  const m = document.getElementById('absenceMonth');
+  if (!m.value) m.value = state.settings.startMonth;
+}
+function renderAbsenceCalendar() {
+  const container = document.getElementById('absenceCalendar');
+  const workerId = parseInt(document.getElementById('absenceWorkerSelect').value);
+  const ym = document.getElementById('absenceMonth').value;
+  const w = state.workers.find(x => x.id === workerId);
+  if (!w || !ym) { container.innerHTML = '<p class="help">Wybierz pracownika i miesiąc.</p>'; return; }
+
+  const [y, m] = ym.split('-').map(Number);
+  const firstDay = new Date(y, m-1, 1);
+  const lastDay = new Date(y, m, 0);
+  const daysIn = lastDay.getDate();
+  let firstDow = firstDay.getDay(); // 0=Sun
+  firstDow = (firstDow + 6) % 7; // convert to Mon=0
+
+  const holidays = holidaysForPeriod();
+  let html = '<div class="calendar-grid">';
+  ['Pn','Wt','Śr','Cz','Pt','So','Nd'].forEach(dn => html += `<div class="dayname">${dn}</div>`);
+  for (let i = 0; i < firstDow; i++) html += '<div class="cell empty"></div>';
+  for (let d = 1; d <= daysIn; d++) {
+    const ymd = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const absence = w.absences[ymd];
+    const wk = isWeekend(ymd) ? ' weekend' : '';
+    const hol = holidays[ymd] ? ' holiday' : '';
+    const abs = absence ? ' ' + absence : '';
+    const holName = holidays[ymd] ? `<br><small>${holidays[ymd]}</small>` : '';
+    html += `<div class="cell${wk}${hol}${abs}" onclick="toggleAbsence(${workerId},'${ymd}')" title="${holidays[ymd]||''}"><strong>${d}</strong> ${absence||''}${holName}</div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+function toggleAbsence(workerId, ymd) {
+  const w = state.workers.find(x => x.id === workerId);
+  if (!w) return;
+  const cur = w.absences[ymd];
+  const cycle = { '': 'U', 'U': 'P', 'P': 'CD', 'CD': 'CN', 'CN': '' };
+  const next = cycle[cur || ''];
+  if (next) w.absences[ymd] = next;
+  else delete w.absences[ymd];
+  saveState();
+  renderAbsenceCalendar();
+}
+
+// ================== SETTINGS ==================
+function bindSettings() {
+  document.getElementById('startMonth').value = state.settings.startMonth;
+  document.getElementById('monthsCount').value = state.settings.monthsCount;
+  document.getElementById('dayShiftCount').value = state.settings.dayShiftCount;
+  document.getElementById('dayShiftMin').value = state.settings.dayShiftMin ?? 5;
+  document.getElementById('nightShiftCount').value = state.settings.nightShiftCount;
+  document.getElementById('nightShiftMin').value = state.settings.nightShiftMin ?? 4;
+  document.getElementById('shiftHours').value = state.settings.shiftHours;
+
+  ['startMonth','monthsCount','dayShiftCount','dayShiftMin','nightShiftCount','nightShiftMin','shiftHours'].forEach(id => {
+    document.getElementById(id).addEventListener('change', e => {
+      const v = e.target.value;
+      state.settings[id] = (id === 'startMonth') ? v : Number(v);
+      saveState();
+      renderWorkersTable();
+    });
+  });
+}
+
+// ================== EXPORT / IMPORT ==================
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `grafik-dane-${ymNow()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function importData(ev) {
+  const f = ev.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      state = data;
+      nextWorkerId = (state.workers.reduce((m,w)=>Math.max(m,w.id),0)) + 1;
+      saveState();
+      location.reload();
+    } catch(err) { alert('Błąd importu: ' + err.message); }
+  };
+  r.readAsText(f);
+}
+function clearAllData() {
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
+// ================== SCHEDULING ALGORITHM ==================
+/*
+ Shift codes: 'D' = dzień, 'N' = noc, 'U' = urlop, 'P' = prośba, 'W' = wolny weekend przydzielony, null = wolny
+ Constraints:
+  - Hard: U, P (prośba = też twarde wolne docelowo), przydzielony wolny weekend
+  - Hard: po N wczoraj, dziś nie może być D (brak odpoczynku)
+  - Hard: max 2 zmiany z rzędu
+  - Hard: max 2 noce z rzędu
+  - Hard: min 4 osoby na noc
+  - Soft: target dni = target nocy per pracownik
+  - Soft: bilans niedziel i świąt
+  - Soft: pattern D-N-O-O preferowany (scoring)
+*/
+function generateSchedule() {
+  const messagesEl = document.getElementById('scheduleMessages');
+  messagesEl.innerHTML = '';
+  if (state.workers.length === 0) { showError('Brak pracowników. Dodaj pracowników najpierw.'); return; }
+  const dates = allDatesInPeriod();
+  if (dates.length === 0) { showError('Nieprawidłowy okres.'); return; }
+
+  const workers = state.workers.map(w => ({ ...w }));
+  const dayShiftCount = state.settings.dayShiftCount;
+  const dayShiftMin = state.settings.dayShiftMin ?? Math.min(5, state.settings.dayShiftCount);
+  const nightShiftCount = state.settings.nightShiftCount;
+  const nightShiftMin = state.settings.nightShiftMin ?? state.settings.nightShiftCount;
+  const shiftHours = state.settings.shiftHours;
+  const holidays = holidaysForPeriod();
+
+  // Per worker: targets. effective = base − weekday-vacation * 7.35.
+  // Split effective into fullShiftTarget (floor(eff/12)) and partialHoursTarget (reszta).
+  // Nocki dzielone po równo wśród pracowników nie-dayOnly.
+  const targets = {};
+  workers.forEach(w => {
+    targets[w.id] = {
+      totalTarget: 0, dayTarget: 0, nightTarget: 0,
+      fullShiftTarget: 0, partialHoursTarget: 0,
+      byMonth: {}, effectiveHoursByMonth: {},
+      totalEffectiveHours: 0, totalBaseHours: 0,
+      dayOnly: !!w.dayOnly
+    };
+    ymList(state.settings.startMonth, state.settings.monthsCount).forEach(ym => {
+      const base = w.hours[ym] || 0;
+      const effective = effectiveMonthHours(w, ym);
+      targets[w.id].byMonth[ym] = Math.round(effective / shiftHours);
+      targets[w.id].effectiveHoursByMonth[ym] = effective;
+      targets[w.id].totalEffectiveHours += effective;
+      targets[w.id].totalBaseHours += base;
+    });
+    const totalH = targets[w.id].totalEffectiveHours;
+    const fullShifts = Math.floor(totalH / shiftHours + 1e-9);
+    const partial = Math.max(0, Math.round((totalH - fullShifts * shiftHours) * 100) / 100);
+    targets[w.id].fullShiftTarget = fullShifts;
+    targets[w.id].partialHoursTarget = partial;
+    targets[w.id].totalTarget = fullShifts;
+  });
+
+  // Equal night distribution among non-dayOnly workers.
+  const totalNightSlotsNeeded = dates.length * nightShiftCount;
+  const nonDayOnlyWorkers = workers.filter(w => !w.dayOnly);
+  workers.forEach(w => { targets[w.id].nightTarget = 0; });
+  if (nonDayOnlyWorkers.length > 0) {
+    const basePerWorker = Math.floor(totalNightSlotsNeeded / nonDayOnlyWorkers.length);
+    const remainder = totalNightSlotsNeeded - basePerWorker * nonDayOnlyWorkers.length;
+    nonDayOnlyWorkers.forEach(w => { targets[w.id].nightTarget = basePerWorker; });
+    // Remainder goes to workers with highest capacity (fullShiftTarget)
+    const byCapacity = [...nonDayOnlyWorkers].sort((a,b) => targets[b.id].fullShiftTarget - targets[a.id].fullShiftTarget);
+    for (let i = 0; i < remainder && i < byCapacity.length; i++) {
+      targets[byCapacity[i].id].nightTarget++;
+    }
+    // Cap at worker's fullShiftTarget
+    nonDayOnlyWorkers.forEach(w => {
+      if (targets[w.id].nightTarget > targets[w.id].fullShiftTarget) {
+        targets[w.id].nightTarget = targets[w.id].fullShiftTarget;
+      }
+    });
+  }
+  workers.forEach(w => {
+    targets[w.id].dayTarget = targets[w.id].fullShiftTarget - targets[w.id].nightTarget;
+  });
+
+  // Initialize schedule map { ymd: { day: [ids], night: [ids] } }
+  // and perWorker status
+  const schedule = {};
+  dates.forEach(d => schedule[d] = { day: [], night: [] });
+
+  const workerStatus = {};
+  workers.forEach(w => {
+    workerStatus[w.id] = {
+      assignedDays: 0, assignedNights: 0,
+      sundays: 0, holidays: 0,
+      byDate: {}, // 'ymd' -> 'D'|'N'|'U'|'P'|'W'
+      freeWeekends: {} // ym -> { sat: ymd, sun: ymd }
+    };
+  });
+
+  // Fill absences. U/P are hard blocks. CD/CN are shift-type preferences stored separately.
+  workers.forEach(w => {
+    workerStatus[w.id].preferences = {};
+    Object.entries(w.absences).forEach(([ymd, type]) => {
+      if (!schedule[ymd]) return;
+      if (type === 'U' || type === 'P') {
+        workerStatus[w.id].byDate[ymd] = type;
+      } else if (type === 'CD' || type === 'CN') {
+        workerStatus[w.id].preferences[ymd] = type;
+      }
+    });
+  });
+
+  // Assign free weekend per worker per month (hard block).
+  // Jeśli pracownik ma U/P w którykolwiek dzień So/Nd w miesiącu — warunek uznajemy za spełniony i nie szukamy dodatkowego weekendu.
+  const assignFreeWeekendWarnings = [];
+  workers.forEach(w => {
+    ymList(state.settings.startMonth, state.settings.monthsCount).forEach(ym => {
+      const monthDates = datesInMonth(ym);
+      const stBy = workerStatus[w.id].byDate;
+
+      // Czy już jest wolny weekendowy dzień (U/P) w tym miesiącu?
+      const hasAbsenceOnWeekend = monthDates.some(d => isWeekend(d) && (stBy[d] === 'U' || stBy[d] === 'P'));
+      if (hasAbsenceOnWeekend) return; // spełnione przez urlop/prośbę
+
+      // Szukaj kandydatów — pary So+Nd bez żadnego przydziału
+      const candidates = [];
+      for (let i = 0; i < monthDates.length - 1; i++) {
+        const sat = monthDates[i];
+        const sun = monthDates[i+1];
+        if (isSaturday(sat) && isSunday(sun)) {
+          if (!stBy[sat] && !stBy[sun]) {
+            const day = dateFromYmd(sat).getDate();
+            const score = -Math.abs(day - 15); // środek miesiąca preferowany
+            candidates.push({ sat, sun, score });
+          }
+        }
+      }
+      if (candidates.length === 0) {
+        assignFreeWeekendWarnings.push(`${w.name}: brak wolnego weekendu w ${formatYm(ym)} (konflikt z urlopem/prośbą)`);
+        return;
+      }
+      candidates.forEach(c => {
+        let unavail = 0;
+        workers.forEach(w2 => {
+          const fw = workerStatus[w2.id].freeWeekends[ym];
+          if (fw && fw.sat === c.sat) unavail += 2;
+          const st2 = workerStatus[w2.id].byDate;
+          if (st2[c.sat] === 'U' || st2[c.sat] === 'P') unavail++;
+          if (st2[c.sun] === 'U' || st2[c.sun] === 'P') unavail++;
+        });
+        c.unavail = unavail;
+      });
+      candidates.sort((a,b) => a.unavail - b.unavail || b.score - a.score);
+      const chosen = candidates[0];
+      workerStatus[w.id].freeWeekends[ym] = { sat: chosen.sat, sun: chosen.sun };
+      stBy[chosen.sat] = 'W';
+      stBy[chosen.sun] = 'W';
+    });
+  });
+
+  // Now iterate through each date and assign shifts
+  const schedulingWarnings = [];
+
+  for (const ymd of dates) {
+    const dateObj = dateFromYmd(ymd);
+    const isSun = isSunday(ymd);
+    const isHol = !!holidays[ymd];
+
+    // Helper: check if worker can work a given shift type today
+    function canWork(w, shift) {
+      const st = workerStatus[w.id];
+      const cur = st.byDate[ymd];
+      if (cur === 'U' || cur === 'P' || cur === 'W' || cur === 'D' || cur === 'N' || cur === 'H') return false;
+
+      // dayOnly — nigdy N
+      if (shift === 'N' && w.dayOnly) return false;
+
+      // Shift-type preferences: CD forbids N, CN forbids D
+      const pref = st.preferences[ymd];
+      if (pref === 'CD' && shift === 'N') return false;
+      if (pref === 'CN' && shift === 'D') return false;
+
+      const isWork = s => s === 'D' || s === 'N' || s === 'H';
+
+      // Zasada weekendowa: nie można pracować So + Nd tego samego weekendu
+      if (isSaturday(ymd)) {
+        const sun = ymdFromDate(new Date(dateObj.getTime() + 86400000));
+        if (isWork(st.byDate[sun])) return false;
+      }
+      if (isSunday(ymd)) {
+        const sat = ymdFromDate(new Date(dateObj.getTime() - 86400000));
+        if (isWork(st.byDate[sat])) return false;
+      }
+
+      // previous day (yesterday)
+      const yest = ymdFromDate(new Date(dateObj.getTime() - 86400000));
+      const yShift = st.byDate[yest];
+
+      // Rule: after N yesterday, cannot D today
+      if (yShift === 'N' && shift === 'D') return false;
+
+      // Rule: max 2 shifts in a row (any combination of D/N on consecutive days)
+      const ereyest = ymdFromDate(new Date(dateObj.getTime() - 2*86400000));
+      const eShift = st.byDate[ereyest];
+      if (isWork(yShift) && isWork(eShift)) return false; // would be 3rd in a row
+
+      // Rule: max 2 nights in a row
+      if (shift === 'N' && yShift === 'N') {
+        if (eShift === 'N') return false;
+      }
+      return true;
+    }
+
+    // Score a worker for a shift
+    function scoreWorker(w, shift) {
+      const st = workerStatus[w.id];
+      const t = targets[w.id];
+      let score = 0;
+
+      // Max priority: CD/CN preference match
+      const pref = st.preferences[ymd];
+      if (pref === 'CD' && shift === 'D') score += 5000;
+      if (pref === 'CN' && shift === 'N') score += 5000;
+
+      // PRIMARY: shift-type deficit (D/N balance).
+      const deficit = (shift === 'D')
+        ? (t.dayTarget - st.assignedDays)
+        : (t.nightTarget - st.assignedNights);
+      if (deficit > 0) score += deficit * 80 + 60;
+      else if (deficit < 0) score += deficit * 250;
+
+      // Secondary: internal D/N symmetry — tylko dla pracowników nie-dayOnly
+      if (!w.dayOnly) {
+        const nMinusD = st.assignedNights - st.assignedDays;
+        if (shift === 'D' && nMinusD > 0) score += nMinusD * 20;
+        if (shift === 'N' && nMinusD < 0) score += (-nMinusD) * 20;
+      }
+
+      // Tertiary: hours deficit względem PEŁNYCH zmian (partial dopełnia resztę post-pass)
+      const hoursAssigned = (st.assignedDays + st.assignedNights) * shiftHours;
+      const fullTargetH = t.fullShiftTarget * shiftHours;
+      const hoursDeficit = fullTargetH - hoursAssigned;
+      score += hoursDeficit * 3;
+
+      // Połączona pula: niedziele + święta (tylko D, bez nocek)
+      if ((isSun || isHol) && shift === 'D') {
+        const avgSunHol = workers.reduce((s,x) => s + workerStatus[x.id].sundays + workerStatus[x.id].holidays, 0) / workers.length;
+        const own = st.sundays + st.holidays;
+        score += (avgSunHol - own) * 15;
+      }
+
+      // Bonus po długiej przerwie — unikamy 5+ dni wolnego
+      let priorRest = 0;
+      for (let i = 1; i <= 5; i++) {
+        const d = ymdFromDate(new Date(dateObj.getTime() - i*86400000));
+        const s = st.byDate[d];
+        if (s === 'D' || s === 'N' || s === 'H') break;
+        priorRest++;
+      }
+      if (priorRest >= 4) score += 2000;      // prawie/już 5 wolnych — trzeba przerwać
+      else if (priorRest >= 3) score += 120;
+
+      // Pattern D→N→O→O — strongly preferred cycle
+      const yest = ymdFromDate(new Date(dateObj.getTime() - 86400000));
+      const ereyest = ymdFromDate(new Date(dateObj.getTime() - 2*86400000));
+      const yShift = st.byDate[yest];
+      const eShift = st.byDate[ereyest];
+      const isRest = s => s !== 'D' && s !== 'N' && s !== 'H';
+
+      if (shift === 'N' && yShift === 'D') score += 300;       // D→N — preferred step
+      if (shift === 'D' && yShift === 'D') score -= 1500;      // D→D — strongly avoid
+      if (shift === 'N' && yShift === 'N') score -= 60;        // N→N — avoid unless must
+      if (shift === 'D' && isRest(yShift) && isRest(eShift)) score += 40;
+      if (isRest(yShift) && eShift === 'N') score -= 20;
+
+      return score;
+    }
+
+    // Picks workers for a shift respecting:
+    //  - target: desired headcount
+    //  - min: minimum headcount (may go below only when physically impossible)
+    //  - no-overtime rule: once picks >= min, skip candidates who would exceed their target hours
+    function pickWorkers(pool, shift, target, min) {
+      const candidates = pool.filter(w => canWork(w, shift));
+      candidates.sort((a,b) => scoreWorker(b, shift) - scoreWorker(a, shift));
+      const picks = [];
+      for (const w of candidates) {
+        if (picks.length >= target) break;
+        const st = workerStatus[w.id];
+        const t = targets[w.id];
+        const hoursAssigned = (st.assignedDays + st.assignedNights) * shiftHours;
+        // Overtime = przekroczenie pełnych zmian (partial hours dopełniamy post-pass)
+        const wouldOvertime = hoursAssigned + shiftHours > t.fullShiftTarget * shiftHours + 0.01;
+        if (picks.length >= min && wouldOvertime) continue;
+        picks.push(w);
+      }
+      return picks;
+    }
+
+    // Night first (protected)
+    const nightPicks = pickWorkers(workers, 'N', nightShiftCount, nightShiftMin);
+    if (nightPicks.length < nightShiftMin) {
+      schedulingWarnings.push(`${ymd}: na noc dostępnych tylko ${nightPicks.length}/${nightShiftMin} osób (poniżej minimum!)`);
+    } else if (nightPicks.length < nightShiftCount) {
+      schedulingWarnings.push(`${ymd}: zredukowana obsada nocy do ${nightPicks.length}/${nightShiftCount} (brak kadry bez nadgodzin)`);
+    }
+    nightPicks.forEach(w => {
+      workerStatus[w.id].byDate[ymd] = 'N';
+      workerStatus[w.id].assignedNights++;
+      if (isSun) workerStatus[w.id].sundays++;
+      if (isHol) workerStatus[w.id].holidays++;
+      schedule[ymd].night.push(w.id);
+    });
+
+    // Day shift
+    const remainingForDay = workers.filter(w => !nightPicks.includes(w));
+    const dayPicks = pickWorkers(remainingForDay, 'D', dayShiftCount, dayShiftMin);
+    if (dayPicks.length < dayShiftMin) {
+      schedulingWarnings.push(`${ymd}: na dzień dostępnych tylko ${dayPicks.length}/${dayShiftMin} osób (poniżej minimum!)`);
+    } else if (dayPicks.length < dayShiftCount) {
+      schedulingWarnings.push(`${ymd}: zredukowana obsada dnia do ${dayPicks.length}/${dayShiftCount} (brak kadry bez nadgodzin)`);
+    }
+    dayPicks.forEach(w => {
+      workerStatus[w.id].byDate[ymd] = 'D';
+      workerStatus[w.id].assignedDays++;
+      if (isSun) workerStatus[w.id].sundays++;
+      if (isHol) workerStatus[w.id].holidays++;
+      schedule[ymd].day.push(w.id);
+    });
+  }
+
+  // ===== Rebalance pass: move shifts from over-target to under-target workers =====
+  function assign(wId, ymd, shift) {
+    const st = workerStatus[wId];
+    st.byDate[ymd] = shift;
+    if (shift === 'D') st.assignedDays++;
+    else st.assignedNights++;
+    if (isSunday(ymd)) st.sundays++;
+    if (holidays[ymd]) st.holidays++;
+    schedule[ymd][shift === 'D' ? 'day' : 'night'].push(wId);
+  }
+  function unassign(wId, ymd) {
+    const st = workerStatus[wId];
+    const shift = st.byDate[ymd];
+    if (shift !== 'D' && shift !== 'N') return;
+    delete st.byDate[ymd];
+    if (shift === 'D') st.assignedDays--;
+    else st.assignedNights--;
+    if (isSunday(ymd)) st.sundays--;
+    if (holidays[ymd]) st.holidays--;
+    const arr = schedule[ymd][shift === 'D' ? 'day' : 'night'];
+    const idx = arr.indexOf(wId);
+    if (idx >= 0) arr.splice(idx, 1);
+  }
+  function canAddStrict(wId, ymd, shift) {
+    const st = workerStatus[wId];
+    if (st.byDate[ymd]) return false;
+    const w = workers.find(x => x.id === wId);
+    if (shift === 'N' && w && w.dayOnly) return false;
+    const pref = st.preferences[ymd];
+    if (pref === 'CD' && shift === 'N') return false;
+    if (pref === 'CN' && shift === 'D') return false;
+    const dObj = dateFromYmd(ymd);
+    const off = n => ymdFromDate(new Date(dObj.getTime() + n*86400000));
+    const yS = st.byDate[off(-1)], eS = st.byDate[off(-2)], tS = st.byDate[off(+1)], fS = st.byDate[off(+2)];
+    const isWk = s => s === 'D' || s === 'N' || s === 'H';
+    // Zasada weekendowa: nie można pracować So + Nd tego samego weekendu
+    if (isSaturday(ymd) && isWk(tS)) return false;
+    if (isSunday(ymd) && isWk(yS)) return false;
+    if (yS === 'N' && shift === 'D') return false;
+    if (shift === 'N' && tS === 'D') return false;
+    if (isWk(eS) && isWk(yS)) return false;
+    if (isWk(yS) && isWk(tS)) return false;
+    if (isWk(tS) && isWk(fS)) return false;
+    if (shift === 'N') {
+      if (yS === 'N' && eS === 'N') return false;
+      if (yS === 'N' && tS === 'N') return false;
+      if (tS === 'N' && fS === 'N') return false;
+    }
+    return true;
+  }
+  function workerDelta(wId) {
+    const st = workerStatus[wId];
+    // Rebalansujemy względem pełnych zmian — partial dopełnia resztę w osobnym post-passie
+    return (st.assignedDays + st.assignedNights) * shiftHours - targets[wId].fullShiftTarget * shiftHours;
+  }
+
+  let rebalanceSwaps = 0;
+  for (let iter = 0; iter < 800; iter++) {
+    const deltas = workers.map(w => ({ id: w.id, d: workerDelta(w.id) }));
+    const over = deltas.filter(x => x.d > 0.01).sort((a,b) => b.d - a.d);
+    const under = deltas.filter(x => x.d < -0.01).sort((a,b) => a.d - b.d);
+    if (!over.length || !under.length) break;
+    if (over[0].d - under[0].d <= shiftHours + 0.01) break;
+
+    let swapped = false;
+    outer:
+    for (const o of over) {
+      for (const ymd of dates) {
+        const sh = workerStatus[o.id].byDate[ymd];
+        if (sh !== 'D' && sh !== 'N') continue;
+        for (const u of under) {
+          if (u.id === o.id) continue;
+          if (o.d - u.d <= shiftHours + 0.01) continue;
+          if (canAddStrict(u.id, ymd, sh)) {
+            unassign(o.id, ymd);
+            assign(u.id, ymd, sh);
+            rebalanceSwaps++;
+            swapped = true;
+            break outer;
+          }
+        }
+      }
+    }
+    if (!swapped) break;
+  }
+
+  // D/N swap rebalance: equalize D vs N internally per worker (pomijamy dayOnly)
+  let dnSwaps = 0;
+  for (let iter = 0; iter < 400 && dnSwaps < 300; iter++) {
+    const stats = workers.filter(w => !w.dayOnly).map(w => {
+      const st = workerStatus[w.id];
+      return { id: w.id, diff: st.assignedDays - st.assignedNights };
+    });
+    if (stats.length < 2) break;
+    stats.sort((a,b) => b.diff - a.diff);
+    const A = stats[0];
+    const B = stats[stats.length - 1];
+    if (A.id === B.id || A.diff - B.diff < 2) break;
+
+    let found = false;
+    for (const dA of dates) {
+      if (workerStatus[A.id].byDate[dA] !== 'D') continue;
+      for (const dB of dates) {
+        if (dA === dB) continue;
+        if (workerStatus[B.id].byDate[dB] !== 'N') continue;
+        unassign(A.id, dA);
+        unassign(B.id, dB);
+        if (canAddStrict(A.id, dB, 'N') && canAddStrict(B.id, dA, 'D')) {
+          assign(A.id, dB, 'N');
+          assign(B.id, dA, 'D');
+          dnSwaps++;
+          found = true;
+          break;
+        } else {
+          assign(A.id, dA, 'D');
+          assign(B.id, dB, 'N');
+        }
+      }
+      if (found) break;
+    }
+    if (!found) break;
+  }
+
+  // ===== Rebalance: równa liczba nocek wśród pracowników nie-dayOnly (±1) =====
+  let nightBalanceSwaps = 0;
+  for (let iter = 0; iter < 400 && nightBalanceSwaps < 200; iter++) {
+    const stats = workers.filter(w => !w.dayOnly).map(w => ({ id: w.id, nights: workerStatus[w.id].assignedNights }));
+    if (stats.length < 2) break;
+    stats.sort((a,b) => b.nights - a.nights);
+    const hi = stats[0], lo = stats[stats.length - 1];
+    if (hi.nights - lo.nights < 2) break;
+
+    // Szukamy: hi ma N w dniu X, lo ma D w dniu Y (lub wolne w Y). Zamieniamy: hi dostaje D w Y (lub nic, jeśli lo miał wolne), lo dostaje N w X.
+    let found = false;
+    for (const dN of dates) {
+      if (workerStatus[hi.id].byDate[dN] !== 'N') continue;
+      for (const dD of dates) {
+        if (dD === dN) continue;
+        const loShift = workerStatus[lo.id].byDate[dD];
+        if (loShift !== 'D') continue;
+        unassign(hi.id, dN);
+        unassign(lo.id, dD);
+        if (canAddStrict(hi.id, dD, 'D') && canAddStrict(lo.id, dN, 'N')) {
+          assign(hi.id, dD, 'D');
+          assign(lo.id, dN, 'N');
+          nightBalanceSwaps++;
+          found = true;
+          break;
+        } else {
+          assign(hi.id, dN, 'N');
+          assign(lo.id, dD, 'D');
+        }
+      }
+      if (found) break;
+    }
+    if (!found) break;
+  }
+
+  // ===== Rebalance: pula niedziele+święta (tylko D) =====
+  const isSunOrHol = ymd => isSunday(ymd) || !!holidays[ymd];
+  function sunHolCount(wId) {
+    return workers.some(w => w.id === wId) ? (workerStatus[wId].sundays + workerStatus[wId].holidays) : 0;
+  }
+  let sunHolSwaps = 0;
+  for (let iter = 0; iter < 400 && sunHolSwaps < 200; iter++) {
+    const stats = workers.map(w => ({ id: w.id, n: sunHolCount(w.id) }));
+    stats.sort((a,b) => b.n - a.n);
+    const hi = stats[0], lo = stats[stats.length - 1];
+    if (hi.id === lo.id || hi.n - lo.n < 2) break;
+
+    // hi oddaje D w niedzielę/święto, lo bierze; w zamian lo oddaje D w dzień powszedni, hi bierze
+    let found = false;
+    for (const dHol of dates) {
+      if (!isSunOrHol(dHol)) continue;
+      if (workerStatus[hi.id].byDate[dHol] !== 'D') continue;
+      for (const dWeek of dates) {
+        if (dWeek === dHol) continue;
+        if (isSunOrHol(dWeek)) continue;
+        if (workerStatus[lo.id].byDate[dWeek] !== 'D') continue;
+        unassign(hi.id, dHol);
+        unassign(lo.id, dWeek);
+        if (canAddStrict(lo.id, dHol, 'D') && canAddStrict(hi.id, dWeek, 'D')) {
+          assign(lo.id, dHol, 'D');
+          assign(hi.id, dWeek, 'D');
+          sunHolSwaps++;
+          found = true;
+          break;
+        } else {
+          assign(hi.id, dHol, 'D');
+          assign(lo.id, dWeek, 'D');
+        }
+      }
+      if (found) break;
+    }
+    if (!found) break;
+  }
+
+  // ===== Post-pass: max 4 dni wolnego pod rząd =====
+  const longRestWarnings = [];
+  function findLongRestRun(wId) {
+    let runStart = -1;
+    let best = null;
+    for (let i = 0; i <= dates.length; i++) {
+      const d = dates[i];
+      const s = d ? workerStatus[wId].byDate[d] : 'X';
+      const isRest = !s || !(['D','N','H'].includes(s));
+      if (isRest && d) {
+        if (runStart === -1) runStart = i;
+      } else {
+        if (runStart !== -1) {
+          const len = i - runStart;
+          if (len >= 5 && (!best || len > best.length)) best = { start: runStart, length: len };
+          runStart = -1;
+        }
+      }
+    }
+    return best;
+  }
+  workers.forEach(w => {
+    for (let tries = 0; tries < 6; tries++) {
+      const run = findLongRestRun(w.id);
+      if (!run) break;
+      // Spróbuj wstawić D w środek ciągu — przez swap z kimś, kto ma nadmiar lub może zrezygnować bez naruszeń
+      const midIdx = run.start + Math.floor(run.length / 2);
+      let done = false;
+      for (let off = 0; off < run.length && !done; off++) {
+        const idx = midIdx + (off % 2 === 0 ? off/2 : -(off+1)/2 | 0);
+        if (idx < run.start || idx >= run.start + run.length) continue;
+        const ymd = dates[idx];
+        // Jeśli obsada D < limit, po prostu dodaj D
+        if (schedule[ymd].day.length < dayShiftCount && canAddStrict(w.id, ymd, 'D')) {
+          assign(w.id, ymd, 'D');
+          done = true; break;
+        }
+        // Spróbuj podmienić z pracownikiem mającym D tego dnia
+        const dayOccupants = [...schedule[ymd].day];
+        for (const otherId of dayOccupants) {
+          if (otherId === w.id) continue;
+          // Jeśli podmiana daje "innej osobie" mniejsze odchylenie od targetu — swap
+          const otherOver = workerDelta(otherId) > 0.01;
+          if (!otherOver) continue;
+          unassign(otherId, ymd);
+          if (canAddStrict(w.id, ymd, 'D')) {
+            assign(w.id, ymd, 'D');
+            done = true; break;
+          } else {
+            assign(otherId, ymd, 'D');
+          }
+        }
+      }
+      if (!done) {
+        longRestWarnings.push(`${w.name}: ${run.length} dni wolnego pod rząd od ${dates[run.start]} — nie udało się skrócić`);
+        break;
+      }
+    }
+  });
+
+  // ===== Post-pass: częściowe dniówki (kod 'H') =====
+  const partialHoursMap = {}; // ymd -> { wId -> hours }
+  const partialWarnings = [];
+  workers.forEach(w => {
+    const t = targets[w.id];
+    if (t.partialHoursTarget < 0.5) return; // brak reszty do uzupełnienia
+    const remaining = t.partialHoursTarget;
+
+    // Znajdź dzień: bez przydziału, canAddStrict('D'), obsada D < limit
+    const candidates = [];
+    for (const ymd of dates) {
+      if (workerStatus[w.id].byDate[ymd]) continue;
+      if (schedule[ymd].day.length >= dayShiftCount) continue;
+      if (!canAddStrict(w.id, ymd, 'D')) continue;
+      let score = 0;
+      if (isWeekend(ymd)) score -= 100;
+      if (holidays[ymd]) score -= 80;
+      // Preferuj dni o niskiej obsadzie D (rozłożenie)
+      score += (dayShiftCount - schedule[ymd].day.length) * 5;
+      candidates.push({ ymd, score });
+    }
+    if (candidates.length === 0) {
+      partialWarnings.push(`${w.name}: nie udało się przydzielić częściowej dniówki (${formatDecimal(remaining)} h brakuje)`);
+      return;
+    }
+    candidates.sort((a,b) => b.score - a.score);
+    const picked = candidates[0].ymd;
+    // Przydziel H — nie rusza sundays/holidays (to pełna D-fairness), bo H to częściowa
+    workerStatus[w.id].byDate[picked] = 'H';
+    schedule[picked].day.push(w.id);
+    if (!partialHoursMap[picked]) partialHoursMap[picked] = {};
+    partialHoursMap[picked][w.id] = remaining;
+  });
+
+  // Diagnostic: supply vs demand
+  const totalDemandH = dates.length * (dayShiftCount + nightShiftCount) * shiftHours;
+  const totalSupplyH = workers.reduce((s,w) => s + targets[w.id].totalEffectiveHours, 0);
+  const balanceWarnings = [];
+  if (totalSupplyH - totalDemandH >= shiftHours - 0.01) {
+    balanceWarnings.push(`Cel pracowników (${Math.round(totalSupplyH)} h) przewyższa zapotrzebowanie (${Math.round(totalDemandH)} h) o ${Math.round(totalSupplyH - totalDemandH)} h — matematycznie niektórzy pracownicy będą pod celem.`);
+  } else if (totalDemandH - totalSupplyH >= shiftHours - 0.01) {
+    balanceWarnings.push(`Zapotrzebowanie (${Math.round(totalDemandH)} h) przewyższa cel pracowników (${Math.round(totalSupplyH)} h) o ${Math.round(totalDemandH - totalSupplyH)} h — zamiast nadgodzin algorytm zredukuje obsadę (nie poniżej minimum).`);
+  }
+
+  // Build per-worker schedule view
+  const workerSchedule = {};
+  workers.forEach(w => {
+    workerSchedule[w.id] = {};
+    dates.forEach(d => {
+      workerSchedule[w.id][d] = workerStatus[w.id].byDate[d] || '';
+    });
+  });
+
+  // Suma godzin partial per pracownik (jedna H na pracownika, ale zliczamy bezpiecznie)
+  const partialHoursByWorker = {};
+  workers.forEach(w => { partialHoursByWorker[w.id] = 0; });
+  Object.entries(partialHoursMap).forEach(([ymd, byW]) => {
+    Object.entries(byW).forEach(([wId, h]) => {
+      partialHoursByWorker[wId] = (partialHoursByWorker[wId] || 0) + h;
+    });
+  });
+
+  state.schedule = {
+    generatedAt: new Date().toISOString(),
+    dates,
+    startMonth: state.settings.startMonth,
+    monthsCount: state.settings.monthsCount,
+    workerSchedule,
+    schedule,
+    partialHours: partialHoursMap,
+    targets,
+    stats: Object.fromEntries(workers.map(w => [w.id, {
+      name: w.name,
+      dayOnly: !!w.dayOnly,
+      days: workerStatus[w.id].assignedDays,
+      nights: workerStatus[w.id].assignedNights,
+      partialHours: Math.round((partialHoursByWorker[w.id] || 0) * 100) / 100,
+      sundays: workerStatus[w.id].sundays,
+      holidays: workerStatus[w.id].holidays,
+      sunHolDays: workerStatus[w.id].sundays + workerStatus[w.id].holidays,
+      totalHours: Math.round(((workerStatus[w.id].assignedDays + workerStatus[w.id].assignedNights) * shiftHours + (partialHoursByWorker[w.id] || 0)) * 100) / 100,
+      fullShiftHours: (workerStatus[w.id].assignedDays + workerStatus[w.id].assignedNights) * shiftHours,
+      targetHours: targets[w.id].totalEffectiveHours,
+      baseHours: targets[w.id].totalBaseHours,
+      vacationDeduction: targets[w.id].totalBaseHours - targets[w.id].totalEffectiveHours
+    }]))
+  };
+  saveState();
+
+  // Check unfulfilled CD/CN preferences
+  const prefWarnings = [];
+  workers.forEach(w => {
+    const prefs = workerStatus[w.id].preferences || {};
+    Object.entries(prefs).forEach(([ymd, pref]) => {
+      const actual = workerStatus[w.id].byDate[ymd];
+      const want = pref === 'CD' ? 'D' : 'N';
+      if (actual !== want) {
+        const label = pref === 'CD' ? 'dniówkę' : 'nockę';
+        prefWarnings.push(`${w.name} (${ymd}): prośba o ${label} nie została spełniona`);
+      }
+    });
+  });
+
+  // Display messages
+  const allWarnings = [...balanceWarnings, ...assignFreeWeekendWarnings, ...schedulingWarnings, ...longRestWarnings, ...partialWarnings, ...prefWarnings];
+  if (rebalanceSwaps > 0 || dnSwaps > 0 || nightBalanceSwaps > 0 || sunHolSwaps > 0) {
+    const parts = [];
+    if (rebalanceSwaps > 0) parts.push(`${rebalanceSwaps} zamian godzinowych`);
+    if (dnSwaps > 0) parts.push(`${dnSwaps} zamian D↔N (wewn.)`);
+    if (nightBalanceSwaps > 0) parts.push(`${nightBalanceSwaps} zamian nocnych (równość)`);
+    if (sunHolSwaps > 0) parts.push(`${sunHolSwaps} zamian nd/święta`);
+    allWarnings.unshift(`Wyrównano grafik (${parts.join(', ')}).`);
+  }
+  if (allWarnings.length === 0) {
+    showSuccess('Grafik wygenerowany pomyślnie. Sprawdź statystyki pod grafikiem.');
+  } else {
+    const msg = allWarnings.slice(0, 15).map(m => '• ' + m).join('<br>');
+    showWarning(`Grafik wygenerowany, ale z uwagami (${allWarnings.length}):<br>${msg}${allWarnings.length > 15 ? '<br>…i więcej' : ''}`);
+  }
+
+  populateScheduleSelectors();
+  renderSchedule();
+}
+
+function showError(msg) { document.getElementById('scheduleMessages').innerHTML = `<div class="errors">${msg}</div>`; }
+function showWarning(msg) { document.getElementById('scheduleMessages').innerHTML = `<div class="warnings">${msg}</div>`; }
+function showSuccess(msg) { document.getElementById('scheduleMessages').innerHTML = `<div class="success-msg">${msg}</div>`; }
+
+// ================== SCHEDULE RENDERING ==================
+function populateScheduleSelectors() {
+  if (!state.schedule) return;
+  const monthSel = document.getElementById('scheduleMonth');
+  const months = ymList(state.schedule.startMonth, state.schedule.monthsCount);
+  monthSel.innerHTML = months.map(m => `<option value="${m}">${formatYm(m)}</option>`).join('');
+
+  const weekSel = document.getElementById('scheduleWeek');
+  const weeks = buildWeeks(state.schedule.dates);
+  weekSel.innerHTML = weeks.map((w,i) => `<option value="${i}">Tydz. ${i+1}: ${formatDate(w.start)} – ${formatDate(w.end)}</option>`).join('');
+}
+function formatDate(ymd) {
+  const [y,m,d] = ymd.split('-');
+  return `${d}.${m}`;
+}
+function buildWeeks(dates) {
+  const weeks = [];
+  let curWeek = [];
+  dates.forEach(d => {
+    if (curWeek.length === 0) curWeek.push(d);
+    else {
+      const prev = curWeek[curWeek.length-1];
+      const dowPrev = dayOfWeek(prev);
+      const isoPrev = (dowPrev + 6) % 7; // Mon=0
+      if (isoPrev === 6) { // Sunday ends week
+        weeks.push({ start: curWeek[0], end: curWeek[curWeek.length-1], days: curWeek });
+        curWeek = [d];
+      } else {
+        curWeek.push(d);
+      }
+    }
+  });
+  if (curWeek.length) weeks.push({ start: curWeek[0], end: curWeek[curWeek.length-1], days: curWeek });
+  return weeks;
+}
+function renderSchedule() {
+  const container = document.getElementById('scheduleContainer');
+  if (!state.schedule) {
+    container.innerHTML = '<p class="help">Brak wygenerowanego grafiku. Kliknij „Wygeneruj grafik".</p>';
+    document.getElementById('statsPanel').style.display = 'none';
+    document.getElementById('coveragePanel').style.display = 'none';
+    document.getElementById('monthSelector').style.display = 'none';
+    document.getElementById('weekSelector').style.display = 'none';
+    return;
+  }
+  const view = document.getElementById('scheduleView').value;
+  document.getElementById('monthSelector').style.display = view === 'month' ? '' : 'none';
+  document.getElementById('weekSelector').style.display = view === 'week' ? '' : 'none';
+
+  let dates;
+  if (view === 'month') {
+    const ym = document.getElementById('scheduleMonth').value || state.schedule.startMonth;
+    dates = state.schedule.dates.filter(d => d.startsWith(ym));
+  } else {
+    const weeks = buildWeeks(state.schedule.dates);
+    const idx = parseInt(document.getElementById('scheduleWeek').value) || 0;
+    dates = weeks[idx] ? weeks[idx].days : [];
+  }
+
+  container.innerHTML = buildGrafikTable(dates);
+  renderStats();
+  renderCoverage(dates);
+}
+function buildGrafikTable(dates) {
+  if (!state.schedule || dates.length === 0) return '<p class="help">Brak danych.</p>';
+  const workers = state.workers;
+  const holidays = holidaysForPeriod();
+  const dowNames = ['Nd','Pn','Wt','Śr','Cz','Pt','So'];
+
+  let html = '<div class="grafik-scroll"><table class="grafik-table"><thead>';
+  html += '<tr><th class="sticky">Pracownik</th>';
+  dates.forEach(d => {
+    const wk = isWeekend(d) ? ' weekend' : '';
+    const hol = holidays[d] ? ' holiday' : '';
+    const day = d.split('-')[2];
+    html += `<th class="${wk}${hol}" title="${holidays[d]||''}">${day}</th>`;
+  });
+  html += '</tr><tr><th class="sticky">Dzień tyg.</th>';
+  dates.forEach(d => {
+    const wk = isWeekend(d) ? ' weekend' : '';
+    const hol = holidays[d] ? ' holiday' : '';
+    html += `<th class="${wk}${hol}">${dowNames[dayOfWeek(d)]}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  const partialMap = state.schedule.partialHours || {};
+  workers.forEach(w => {
+    html += `<tr><td class="sticky">${escapeHtml(w.name)}</td>`;
+    dates.forEach(d => {
+      const cell = state.schedule.workerSchedule[w.id] ? state.schedule.workerSchedule[w.id][d] : '';
+      const cls = cell ? `cell-${cell}` : '';
+      const wk = isWeekend(d) ? ' weekend' : '';
+      const hol = holidays[d] ? ' holiday' : '';
+      let display = cell === 'W' ? '' : (cell || '');
+      if (cell === 'H') {
+        const h = partialMap[d] && partialMap[d][w.id];
+        display = h ? ('H' + formatPartial(h)) : 'H';
+      }
+      html += `<td class="${cls}${wk}${hol}" title="${cell === 'H' && partialMap[d] && partialMap[d][w.id] ? 'Częściowa dniówka '+formatDecimal(partialMap[d][w.id])+' h' : ''}">${display}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+function formatPartial(h) {
+  if (h == null) return '';
+  // Całkowite godziny bez miejsc po przecinku, reszta z jednym miejscem (np. H7 lub H7,4)
+  const rounded = Math.round(h * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 0.05) return String(Math.round(rounded));
+  return String(rounded).replace('.', ',');
+}
+function renderStats() {
+  const panel = document.getElementById('statsPanel');
+  const tbl = document.getElementById('workerStatsTable');
+  if (!state.schedule) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  const shiftHours = state.settings.shiftHours;
+
+  let html = '<thead><tr><th>Pracownik</th><th title="Tylko dniówki">tylko&nbsp;D</th><th>Dni</th><th>Noce</th><th title="Godziny częściowej dniówki">H (h)</th><th>Σ zmian</th><th>Wypr. (h)</th><th>Cel bazowy</th><th>Odlicz. urlop</th><th>Cel efekt.</th><th>Różnica</th><th title="Niedziele + święta (D)">Nd+Św</th><th>Nd</th><th>Święta</th></tr></thead><tbody>';
+  state.workers.forEach(w => {
+    const s = state.schedule.stats[w.id];
+    if (!s) return;
+    const diff = Math.round((s.totalHours - s.targetHours) * 100) / 100;
+    const diffStr = diff === 0 ? '—' : (diff > 0 ? `+${formatDecimal(diff)}` : formatDecimal(diff));
+    const diffColor = Math.abs(diff) < 0.5 ? '#166534' : (Math.abs(diff) <= 2 ? '#92400e' : '#991b1b');
+    const partialCell = s.partialHours > 0 ? formatDecimal(s.partialHours) : '—';
+    html += `<tr>
+      <td>${escapeHtml(w.name)}</td>
+      <td style="text-align:center">${s.dayOnly ? '✓' : ''}</td>
+      <td>${s.days}</td>
+      <td>${s.nights}</td>
+      <td>${partialCell}</td>
+      <td>${s.days+s.nights+(s.partialHours>0?1:0)}</td>
+      <td>${formatDecimal(s.totalHours)}</td>
+      <td>${formatDecimal(Math.round(s.baseHours*100)/100) || '0'}</td>
+      <td>${s.vacationDeduction > 0 ? '−'+formatDecimal(Math.round(s.vacationDeduction*100)/100) : '—'}</td>
+      <td><strong>${formatDecimal(Math.round(s.targetHours*100)/100) || '0'}</strong></td>
+      <td style="color:${diffColor};font-weight:600">${diffStr}</td>
+      <td><strong>${s.sunHolDays != null ? s.sunHolDays : (s.sundays + s.holidays)}</strong></td>
+      <td>${s.sundays}</td>
+      <td>${s.holidays}</td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  tbl.innerHTML = html;
+}
+function renderCoverage(dates) {
+  const panel = document.getElementById('coveragePanel');
+  const tbl = document.getElementById('coverageTable');
+  if (!state.schedule || !dates || !dates.length) { panel.style.display='none'; return; }
+  panel.style.display = '';
+  const holidays = holidaysForPeriod();
+  const dowNames = ['Nd','Pn','Wt','Śr','Cz','Pt','So'];
+  const partialMap = state.schedule.partialHours || {};
+  let html = '<thead><tr><th>Data</th><th>Dzień</th><th>Dzień (D)</th><th>Noc (N)</th><th>Urlopy/Prośby</th></tr></thead><tbody>';
+  dates.forEach(d => {
+    const s = state.schedule.schedule[d] || {day:[],night:[]};
+    const dayNames = s.day.map(id => {
+      const nm = state.workers.find(w=>w.id===id)?.name || id;
+      if (partialMap[d] && partialMap[d][id] != null) {
+        return `${nm} (H${formatPartial(partialMap[d][id])}h)`;
+      }
+      return nm;
+    }).join(', ');
+    const nightNames = s.night.map(id => state.workers.find(w=>w.id===id)?.name || id).join(', ');
+    const absent = state.workers.filter(w => {
+      const c = state.schedule.workerSchedule[w.id]?.[d];
+      return c === 'U' || c === 'P';
+    }).map(w => `${w.name}(${state.schedule.workerSchedule[w.id][d]})`).join(', ');
+    const wk = isWeekend(d) ? 'style="background:#fff8e1"' : '';
+    const hol = holidays[d] ? 'style="background:#fce7f3"' : wk;
+    html += `<tr ${hol}><td>${formatDate(d)}</td><td>${dowNames[dayOfWeek(d)]}</td><td>${dayNames} <strong>(${s.day.length})</strong></td><td>${nightNames} <strong>(${s.night.length})</strong></td><td>${absent||'—'}</td></tr>`;
+  });
+  html += '</tbody>';
+  tbl.innerHTML = html;
+}
+
+// ================== EXCEL EXPORT ==================
+function exportToExcel() {
+  if (!state.schedule) { alert('Najpierw wygeneruj grafik.'); return; }
+  if (typeof XLSX === 'undefined') { alert('Biblioteka XLSX nie jest załadowana. Sprawdź połączenie z internetem.'); return; }
+
+  const wb = XLSX.utils.book_new();
+  const holidays = holidaysForPeriod();
+  const months = ymList(state.schedule.startMonth, state.schedule.monthsCount);
+  const dowNames = ['Nd','Pn','Wt','Śr','Cz','Pt','So'];
+
+  // ------- One sheet per month (main schedule) -------
+  months.forEach(ym => {
+    const dates = state.schedule.dates.filter(d => d.startsWith(ym));
+    const rows = [];
+    // Header rows: day number, day-of-week, holiday marker
+    const h1 = ['Pracownik'];
+    const h2 = ['Dzień tyg.'];
+    const h3 = ['Święto'];
+    dates.forEach(d => {
+      h1.push(Number(d.split('-')[2]));
+      h2.push(dowNames[dayOfWeek(d)]);
+      h3.push(holidays[d] ? '★' : '');
+    });
+    h1.push('Dni', 'Noce', 'H (h)', 'Σ godz.', 'Cel bazowy', 'Odlicz.', 'Cel efekt.');
+    h2.push('', '', '', '', '', '', '');
+    h3.push('', '', '', '', '', '', '');
+    rows.push(h1); rows.push(h2); rows.push(h3);
+
+    const partialMap = state.schedule.partialHours || {};
+    state.workers.forEach(w => {
+      const row = [w.name];
+      let days = 0, nights = 0, partialH = 0;
+      dates.forEach(d => {
+        const c = state.schedule.workerSchedule[w.id]?.[d] || '';
+        let disp = c === 'W' ? '' : c;
+        if (c === 'H') {
+          const h = partialMap[d] && partialMap[d][w.id];
+          disp = h ? ('H' + formatPartial(h)) : 'H';
+          if (h) partialH += h;
+        }
+        row.push(disp);
+        if (c === 'D') days++;
+        if (c === 'N') nights++;
+      });
+      const totalH = (days + nights) * state.settings.shiftHours + partialH;
+      const base = w.hours[ym] || 0;
+      const eff = effectiveMonthHours(w, ym);
+      const ded = Math.round((base - eff) * 100) / 100;
+      row.push(days, nights, Math.round(partialH*100)/100, Math.round(totalH*100)/100, base, ded, Math.round(eff*100)/100);
+      rows.push(row);
+    });
+
+    // Coverage summary rows
+    rows.push([]);
+    const dayRow = ['OBSADA DZIEŃ'];
+    const nightRow = ['OBSADA NOC'];
+    dates.forEach(d => {
+      dayRow.push(state.schedule.schedule[d]?.day?.length || 0);
+      nightRow.push(state.schedule.schedule[d]?.night?.length || 0);
+    });
+    rows.push(dayRow); rows.push(nightRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Column widths
+    const colW = [{ wch: 22 }];
+    for (let i = 0; i < dates.length; i++) colW.push({ wch: 5 });
+    colW.push({ wch: 6 }, { wch: 6 }, { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 });
+    ws['!cols'] = colW;
+    ws['!rows'] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 18 }];
+
+    // Colors — stronger for print visibility
+    const COLOR_WEEKEND_BG = 'FFE082';   // medium yellow
+    const COLOR_HOLIDAY_BG = 'F8BBD0';   // medium pink
+    const COLOR_WEEKEND_LIGHT = 'FFF3C4';// for data cells
+    const COLOR_HOLIDAY_LIGHT = 'FCE4EC';
+
+    const headerRowCount = 3;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = 0; R <= range.e.r; R++) {
+      for (let C = 0; C <= range.e.c; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+        const cell = ws[addr];
+        const dateCol = C >= 1 && C <= dates.length;
+        const d = dateCol ? dates[C - 1] : null;
+        const isHol = d && holidays[d];
+        const isWk = d && isWeekend(d);
+
+        cell.s = {
+          alignment: { horizontal: 'center', vertical: 'center' },
+          border: {
+            top: { style: 'thin', color: { rgb: '999999' } },
+            bottom: { style: 'thin', color: { rgb: '999999' } },
+            left: { style: 'thin', color: { rgb: '999999' } },
+            right: { style: 'thin', color: { rgb: '999999' } }
+          }
+        };
+
+        if (R < headerRowCount) {
+          cell.s.font = { bold: true, color: { rgb: '1E3A5F' }, sz: 11 };
+          cell.s.fill = { patternType: 'solid', fgColor: { rgb: 'EEF2F7' } };
+          if (isHol) cell.s.fill = { patternType: 'solid', fgColor: { rgb: COLOR_HOLIDAY_BG } };
+          else if (isWk) cell.s.fill = { patternType: 'solid', fgColor: { rgb: COLOR_WEEKEND_BG } };
+          if (R === 2 && isHol) cell.s.font = { bold: true, color: { rgb: '880E4F' }, sz: 12 };
+        } else {
+          const v = cell.v;
+          const vStr = typeof v === 'string' ? v : '';
+          if (v === 'D') { cell.s.fill = { patternType: 'solid', fgColor: { rgb: 'FEF3C7' } }; cell.s.font = { bold: true, color: { rgb: '92400E' } }; }
+          else if (v === 'N') { cell.s.fill = { patternType: 'solid', fgColor: { rgb: '1F2A44' } }; cell.s.font = { bold: true, color: { rgb: 'FFFFFF' } }; }
+          else if (v === 'U') { cell.s.fill = { patternType: 'solid', fgColor: { rgb: 'BAE6FD' } }; cell.s.font = { bold: true, color: { rgb: '075985' } }; }
+          else if (v === 'P') { cell.s.fill = { patternType: 'solid', fgColor: { rgb: 'FEE2E2' } }; cell.s.font = { bold: true, color: { rgb: '991B1B' } }; }
+          else if (vStr.startsWith('H')) { cell.s.fill = { patternType: 'solid', fgColor: { rgb: 'FDE68A' } }; cell.s.font = { bold: true, color: { rgb: '78350F' }, sz: 9 }; }
+          else if (dateCol) {
+            if (isHol) cell.s.fill = { patternType: 'solid', fgColor: { rgb: COLOR_HOLIDAY_LIGHT } };
+            else if (isWk) cell.s.fill = { patternType: 'solid', fgColor: { rgb: COLOR_WEEKEND_LIGHT } };
+          }
+          // Add strong top/bottom border on weekend/holiday columns so they remain visible when a shift color covers the cell
+          if (dateCol && (isHol || isWk)) {
+            const col = isHol ? '880E4F' : 'B8860B';
+            cell.s.border.top = { style: 'medium', color: { rgb: col } };
+            cell.s.border.bottom = { style: 'medium', color: { rgb: col } };
+          }
+          if (C === 0) { cell.s.alignment = { horizontal: 'left', vertical: 'center' }; cell.s.font = { bold: true }; }
+        }
+      }
+    }
+    // Freeze header rows and first column
+    ws['!freeze'] = { xSplit: 1, ySplit: headerRowCount };
+    // Print setup — landscape, fit to 1 page wide
+    ws['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0 };
+    ws['!margins'] = { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 };
+
+    XLSX.utils.book_append_sheet(wb, ws, formatYm(ym).replace('.',''));
+  });
+
+  // ------- Statistics sheet -------
+  const statsRows = [['Pracownik','Tylko D','Dni','Noce','H (h)','Σ zmian','Wypr. (h)','Cel bazowy','Odlicz. urlop','Cel efekt.','Różnica','Nd+Św','Niedziele','Święta']];
+  state.workers.forEach(w => {
+    const s = state.schedule.stats[w.id];
+    if (!s) return;
+    statsRows.push([
+      w.name,
+      s.dayOnly ? '✓' : '',
+      s.days, s.nights,
+      s.partialHours || 0,
+      s.days + s.nights + (s.partialHours > 0 ? 1 : 0),
+      Math.round(s.totalHours*100)/100,
+      Math.round(s.baseHours*100)/100,
+      Math.round(s.vacationDeduction*100)/100,
+      Math.round(s.targetHours*100)/100,
+      Math.round((s.totalHours - s.targetHours)*100)/100,
+      (s.sunHolDays != null ? s.sunHolDays : (s.sundays + s.holidays)),
+      s.sundays, s.holidays
+    ]);
+  });
+  const ws2 = XLSX.utils.aoa_to_sheet(statsRows);
+  ws2['!cols'] = [{wch:22},{wch:8},{wch:6},{wch:6},{wch:8},{wch:10},{wch:10},{wch:12},{wch:14},{wch:12},{wch:10},{wch:8},{wch:10},{wch:8}];
+  // Bold header for stats
+  const r2 = XLSX.utils.decode_range(ws2['!ref']);
+  for (let C = 0; C <= r2.e.c; C++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c: C });
+    if (ws2[addr]) ws2[addr].s = { font: { bold: true, color: { rgb: '1E3A5F' } }, fill: { patternType: 'solid', fgColor: { rgb: 'EEF2F7' } }, alignment: { horizontal: 'center' } };
+  }
+  XLSX.utils.book_append_sheet(wb, ws2, 'Statystyki');
+
+  // ------- Legenda -------
+  const legend = [
+    ['Legenda'],
+    ['D','Zmiana dzienna (12h)'],
+    ['N','Zmiana nocna (12h)'],
+    ['H#','Częściowa dniówka (# godzin zamiast 12) — dopełnia godziny Kodeksu Pracy'],
+    ['U','Urlop (odejmuje 7,35 h w dni robocze)'],
+    ['P','Prośba o wolne'],
+    ['CD','Prośba o dniówkę (pracownik chce D tego dnia)'],
+    ['CN','Prośba o nockę (pracownik chce N tego dnia)'],
+    ['(puste)','Wolne'],
+    ['★ w nagłówku','Święto'],
+    ['Kolor żółty','Weekend (sobota/niedziela)'],
+    ['Kolor różowy','Święto'],
+    ['Tylko D','Pracownik pracujący wyłącznie na dniówkach (bez nocek)'],
+    [],
+    ['Okres:', `${formatYm(months[0])} – ${formatYm(months[months.length-1])}`],
+    ['Wygenerowano:', new Date().toLocaleString('pl-PL')]
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(legend);
+  ws3['!cols'] = [{wch:12},{wch:40}];
+  XLSX.utils.book_append_sheet(wb, ws3, 'Legenda');
+
+  const fname = `Grafik_${months[0]}_${months[months.length-1]}.xlsx`;
+  XLSX.writeFile(wb, fname, { cellStyles: true });
+}
+
+// ================== INIT ==================
+loadState();
+bindSettings();
+renderWorkersTable();
+populateAbsenceWorkerSelect();
+if (state.schedule) { populateScheduleSelectors(); }
+</script>
+</body>
+</html>
