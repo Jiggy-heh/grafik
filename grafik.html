@@ -1249,12 +1249,17 @@ function generateSchedule() {
   const partialHoursMap = {};
   const partialWarnings = [];
   const forcedLastDaysPartialWarnings = [];
+  const partialOverflowWarnings = [];
   const closeHoursWarnings = [];
+  const PARTIALS_PER_DAY_LIMIT = 1;
+  const ENABLE_PARTIAL_OVERFLOW_FALLBACK = false;
   const closureExtraHByWorker = {};
   const closureExtraDByWorker = {};
+  const closureExtraNByWorker = {};
   workers.forEach(w => {
     closureExtraHByWorker[w.id] = 0;
     closureExtraDByWorker[w.id] = 0;
+    closureExtraNByWorker[w.id] = 0;
   });
 
   function monthDayPosition(ymd) {
@@ -1265,16 +1270,30 @@ function generateSchedule() {
     return { dayNo, dim, fromEnd };
   }
 
-  function partialsOnDate(ymd) {
+  function partialCountOnDate(ymd) {
     return partialHoursMap[ymd] ? Object.keys(partialHoursMap[ymd]).length : 0;
   }
 
-  function assignPartialShift(wId, ymd, hours) {
+  function canPlacePartialOnDate(ymd, opts = {}) {
+    const { allowOverflowFallback = false } = opts;
+    const count = partialCountOnDate(ymd);
+    if (count < PARTIALS_PER_DAY_LIMIT) return true;
+    return allowOverflowFallback && ENABLE_PARTIAL_OVERFLOW_FALLBACK;
+  }
+
+  function assignPartialShift(wId, ymd, hours, opts = {}) {
+    const { allowOverflowFallback = false, reason = '' } = opts;
+    if (!canPlacePartialOnDate(ymd, { allowOverflowFallback })) return false;
+    if (workerStatus[wId].byDate[ymd]) return false;
     workerStatus[wId].byDate[ymd] = 'H';
     schedule[ymd].day.push(wId);
     if (!partialHoursMap[ymd]) partialHoursMap[ymd] = {};
     partialHoursMap[ymd][wId] = Math.round(hours * 100) / 100;
     partialHoursByWorker[wId] = Math.round((partialHoursByWorker[wId] + hours) * 100) / 100;
+    if (partialCountOnDate(ymd) > PARTIALS_PER_DAY_LIMIT) {
+      partialOverflowWarnings.push(`${workers.find(w => w.id === wId).name}: więcej niż 1 H na ${ymd}${reason ? ` (${reason})` : ''}.`);
+    }
+    return true;
   }
 
   function workerPartialCount(wId) {
@@ -1291,18 +1310,19 @@ function generateSchedule() {
     score -= pos.dayNo * 4.2;
     if (pos.fromEnd <= 2) score -= 1800;
     else if (pos.fromEnd <= 5) score -= 260;
-    if (mode === 'H') score -= partialsOnDate(ymd) * 170;
+    if (mode === 'H') score -= partialCountOnDate(ymd) * 170;
     return score;
   }
 
   function pickBestPartialDay(wId, remainingHours, opts = {}) {
-    const { allowLastTwoDays = false } = opts;
+    const { allowLastTwoDays = false, allowOverflowFallback = false } = opts;
     const pref = workerStatus[wId].preferences;
     const candidates = [];
     for (const ymd of dates) {
       if (workerStatus[wId].byDate[ymd]) continue;
       if (pref[ymd] === 'CN') continue;
       if (schedule[ymd].day.length >= dayShiftCount) continue;
+      if (!canPlacePartialOnDate(ymd, { allowOverflowFallback })) continue;
       if (!canAddStrict(wId, ymd, 'D')) continue;
       if (getAssignedHoursForWorker(wId) + remainingHours > targets[wId].totalEffectiveHours + 0.01) continue;
       const pos = monthDayPosition(ymd);
@@ -1338,21 +1358,31 @@ function generateSchedule() {
       if (picked && monthDayPosition(picked).fromEnd <= 2) forcedLastTwo = true;
     }
     if (!picked) {
-      partialWarnings.push(`${w.name}: nie udało się przydzielić częściowej dniówki (${formatDecimal(remaining)} h brakuje)`);
+      if (ENABLE_PARTIAL_OVERFLOW_FALLBACK) {
+        picked = pickBestPartialDay(w.id, remaining, { allowLastTwoDays: true, allowOverflowFallback: true });
+      }
+    }
+    if (!picked) {
+      partialWarnings.push(`${w.name}: nie udało się przydzielić częściowej dniówki (${formatDecimal(remaining)} h brakuje, limit 1 H/dzień).`);
       return;
     }
-    assignPartialShift(w.id, picked, remaining);
+    if (!assignPartialShift(w.id, picked, remaining, { allowOverflowFallback: false })) {
+      partialWarnings.push(`${w.name}: nie udało się przydzielić częściowej dniówki (${formatDecimal(remaining)} h brakuje, konflikt reguł H).`);
+      return;
+    }
     if (forcedLastTwo) {
       forcedLastDaysPartialWarnings.push(`${w.name}: H przydzielono na ${picked} (fallback – brak innej legalnej opcji poza 2 ostatnimi dniami miesiąca).`);
     }
   });
 
-  function hasFeasibleDirectFullDay(wId) {
+  function hasFeasibleDirectFullShift(wId, shift) {
     const t = targets[wId];
+    const bucket = shift === 'D' ? 'day' : 'night';
+    const cap = shift === 'D' ? dayShiftCount : nightShiftCount;
     for (const ymd of dates) {
       if (workerStatus[wId].byDate[ymd]) continue;
-      if (schedule[ymd].day.length >= dayShiftCount) continue;
-      if (!canAddStrict(wId, ymd, 'D')) continue;
+      if (schedule[ymd][bucket].length >= cap) continue;
+      if (!canAddStrict(wId, ymd, shift)) continue;
       if (getAssignedHoursForWorker(wId) + shiftHours > t.totalEffectiveHours + 0.01) continue;
       return true;
     }
@@ -1364,30 +1394,35 @@ function generateSchedule() {
     if (missingHours <= 0.01) return false;
     if (pCount === 0) return true;
     if (pCount >= 2) return false;
-    if (missingHours >= shiftHours - 0.01 && hasFeasibleDirectFullDay(wId)) return false;
+    if (missingHours >= shiftHours - 0.01 && (hasFeasibleDirectFullShift(wId, 'D') || hasFeasibleDirectFullShift(wId, 'N'))) return false;
     return true;
   }
 
-  function tryAssignFullDayForClosure(wId) {
+  function tryAssignFullShiftForClosure(wId, shift, opts = {}) {
+    const { allowTakeover = true, aggressive = false } = opts;
     const st = workerStatus[wId];
     const t = targets[wId];
+    const bucket = shift === 'D' ? 'day' : 'night';
+    const cap = shift === 'D' ? dayShiftCount : nightShiftCount;
     const directCandidates = [];
 
     for (const ymd of dates) {
       if (st.byDate[ymd]) continue;
-      if (schedule[ymd].day.length >= dayShiftCount) continue;
-      if (!canAddStrict(wId, ymd, 'D')) continue;
+      if (!aggressive && schedule[ymd][bucket].length >= cap) continue;
+      if (!canAddStrict(wId, ymd, shift)) continue;
       if (getAssignedHoursForWorker(wId) + shiftHours > t.totalEffectiveHours + 0.01) continue;
-      let score = closurePlacementScore(wId, ymd, 'D');
-      score += (dayShiftCount - schedule[ymd].day.length) * 6;
+      let score = closurePlacementScore(wId, ymd, shift === 'D' ? 'D' : 'N');
+      score += (cap - schedule[ymd][bucket].length) * 6;
+      if (shift === 'N' && workerStatus[wId].preferences[ymd] === 'CN') score += 220;
       directCandidates.push({ ymd, score });
     }
 
     if (directCandidates.length) {
       directCandidates.sort((a,b) => b.score - a.score);
-      assign(wId, directCandidates[0].ymd, 'D');
+      assign(wId, directCandidates[0].ymd, shift);
       return true;
     }
+    if (!allowTakeover) return false;
 
     const overWorkers = workers
       .map(w => ({ id: w.id, over: workerDelta(w.id) }))
@@ -1397,8 +1432,8 @@ function generateSchedule() {
     const takeoverCandidates = [];
     for (const over of overWorkers) {
       for (const ymd of dates) {
-        if (workerStatus[over.id].byDate[ymd] !== 'D') continue;
-        const score = closurePlacementScore(wId, ymd, 'D') + over.over * 9;
+        if (workerStatus[over.id].byDate[ymd] !== shift) continue;
+        const score = closurePlacementScore(wId, ymd, shift) + over.over * 9;
         takeoverCandidates.push({ donorId: over.id, ymd, score });
       }
     }
@@ -1406,11 +1441,11 @@ function generateSchedule() {
 
     for (const cand of takeoverCandidates) {
       unassign(cand.donorId, cand.ymd);
-      if (canAddStrict(wId, cand.ymd, 'D') && getAssignedHoursForWorker(wId) + shiftHours <= t.totalEffectiveHours + 0.01) {
-        assign(wId, cand.ymd, 'D');
+      if (canAddStrict(wId, cand.ymd, shift) && getAssignedHoursForWorker(wId) + shiftHours <= t.totalEffectiveHours + 0.01) {
+        assign(wId, cand.ymd, shift);
         return true;
       }
-      assign(cand.donorId, cand.ymd, 'D');
+      assign(cand.donorId, cand.ymd, shift);
     }
 
     return false;
@@ -1437,21 +1472,27 @@ function generateSchedule() {
           if (picked && monthDayPosition(picked).fromEnd <= 2) forcedLastTwo = true;
         }
         if (picked) {
-          assignPartialShift(w.id, picked, partialNeed);
-          closureExtraHByWorker[w.id] = Math.round((closureExtraHByWorker[w.id] + partialNeed) * 100) / 100;
-          if (forcedLastTwo) {
-            forcedLastDaysPartialWarnings.push(`${w.name}: H${formatDecimal(partialNeed)} przydzielono na ${picked} (fallback – brak innej legalnej opcji poza 2 ostatnimi dniami miesiąca).`);
+          if (assignPartialShift(w.id, picked, partialNeed, { allowOverflowFallback: false, reason: 'closure-primary' })) {
+            closureExtraHByWorker[w.id] = Math.round((closureExtraHByWorker[w.id] + partialNeed) * 100) / 100;
+            if (forcedLastTwo) {
+              forcedLastDaysPartialWarnings.push(`${w.name}: H${formatDecimal(partialNeed)} przydzielono na ${picked} (fallback – brak innej legalnej opcji poza 2 ostatnimi dniami miesiąca).`);
+            }
           }
         }
       }
 
       missing = Math.round((t.totalEffectiveHours - getAssignedHoursForWorker(w.id)) * 100) / 100;
-      let fullDaysNeeded = Math.floor((missing + 0.01) / shiftHours);
-      while (fullDaysNeeded > 0) {
-        const ok = tryAssignFullDayForClosure(w.id);
-        if (!ok) break;
-        closureExtraDByWorker[w.id]++;
-        fullDaysNeeded--;
+      let fullShiftsNeeded = Math.floor((missing + 0.01) / shiftHours);
+      while (fullShiftsNeeded > 0) {
+        const okD = tryAssignFullShiftForClosure(w.id, 'D', { allowTakeover: false, aggressive: false });
+        if (okD) { closureExtraDByWorker[w.id]++; fullShiftsNeeded--; continue; }
+        const okN = tryAssignFullShiftForClosure(w.id, 'N', { allowTakeover: false, aggressive: false });
+        if (okN) { closureExtraNByWorker[w.id]++; fullShiftsNeeded--; continue; }
+        const takeoverD = tryAssignFullShiftForClosure(w.id, 'D', { allowTakeover: true, aggressive: false });
+        if (takeoverD) { closureExtraDByWorker[w.id]++; fullShiftsNeeded--; continue; }
+        const takeoverN = tryAssignFullShiftForClosure(w.id, 'N', { allowTakeover: true, aggressive: false });
+        if (takeoverN) { closureExtraNByWorker[w.id]++; fullShiftsNeeded--; continue; }
+        break;
       }
 
       missing = Math.round((t.totalEffectiveHours - getAssignedHoursForWorker(w.id)) * 100) / 100;
@@ -1463,11 +1504,40 @@ function generateSchedule() {
           if (picked && monthDayPosition(picked).fromEnd <= 2) forcedLastTwo = true;
         }
         if (picked) {
-          assignPartialShift(w.id, picked, missing);
-          closureExtraHByWorker[w.id] = Math.round((closureExtraHByWorker[w.id] + missing) * 100) / 100;
-          if (forcedLastTwo) {
-            forcedLastDaysPartialWarnings.push(`${w.name}: H${formatDecimal(missing)} przydzielono na ${picked} (fallback – brak innej legalnej opcji poza 2 ostatnimi dniami miesiąca).`);
+          if (assignPartialShift(w.id, picked, missing, { allowOverflowFallback: false, reason: 'closure-secondary' })) {
+            closureExtraHByWorker[w.id] = Math.round((closureExtraHByWorker[w.id] + missing) * 100) / 100;
+            if (forcedLastTwo) {
+              forcedLastDaysPartialWarnings.push(`${w.name}: H${formatDecimal(missing)} przydzielono na ${picked} (fallback – brak innej legalnej opcji poza 2 ostatnimi dniami miesiąca).`);
+            }
           }
+        }
+      }
+
+      missing = Math.round((t.totalEffectiveHours - getAssignedHoursForWorker(w.id)) * 100) / 100;
+      if (missing > 0.01) {
+        // Faza awaryjna: jeszcze raz próbujemy legalnego domknięcia (D, N, przejęcia i finalne H).
+        let emergencyProgress = true;
+        let emergencyGuard = 0;
+        while (missing > 0.01 && emergencyProgress && emergencyGuard < 12) {
+          emergencyGuard++;
+          emergencyProgress = false;
+          if (missing >= shiftHours - 0.01) {
+            if (tryAssignFullShiftForClosure(w.id, 'D', { allowTakeover: true, aggressive: true })) {
+              closureExtraDByWorker[w.id]++; emergencyProgress = true;
+            } else if (tryAssignFullShiftForClosure(w.id, 'N', { allowTakeover: true, aggressive: true })) {
+              closureExtraNByWorker[w.id]++; emergencyProgress = true;
+            }
+          } else if (canAddAnotherClosurePartial(w.id, missing)) {
+            let picked = pickBestPartialDay(w.id, missing, { allowLastTwoDays: true });
+            if (!picked && ENABLE_PARTIAL_OVERFLOW_FALLBACK) {
+              picked = pickBestPartialDay(w.id, missing, { allowLastTwoDays: true, allowOverflowFallback: true });
+            }
+            if (picked && assignPartialShift(w.id, picked, missing, { allowOverflowFallback: false, reason: 'closure-emergency' })) {
+              closureExtraHByWorker[w.id] = Math.round((closureExtraHByWorker[w.id] + missing) * 100) / 100;
+              emergencyProgress = true;
+            }
+          }
+          missing = Math.round((t.totalEffectiveHours - getAssignedHoursForWorker(w.id)) * 100) / 100;
         }
       }
 
@@ -1486,11 +1556,24 @@ function generateSchedule() {
   const closureReportD = workers
     .filter(w => closureExtraDByWorker[w.id] > 0)
     .map(w => `${w.name} (+D ${closureExtraDByWorker[w.id]})`);
+  const closureReportN = workers
+    .filter(w => closureExtraNByWorker[w.id] > 0)
+    .map(w => `${w.name} (+N ${closureExtraNByWorker[w.id]})`);
   if (closureReportH.length) {
     closeHoursWarnings.unshift(`Domknięcie dodatkowym H: ${closureReportH.join(', ')}`);
   }
   if (closureReportD.length) {
     closeHoursWarnings.unshift(`Domknięcie dodatkowymi D: ${closureReportD.join(', ')}`);
+  }
+  if (closureReportN.length) {
+    closeHoursWarnings.unshift(`Domknięcie dodatkowymi N: ${closureReportN.join(', ')}`);
+  }
+  const partialDaysUsed = Object.keys(partialHoursMap).filter(d => partialCountOnDate(d) > 0).length;
+  closeHoursWarnings.unshift(`Dni z częściową dniówką H: ${partialDaysUsed}. Limit: max ${PARTIALS_PER_DAY_LIMIT} H / dzień.`);
+  if (partialOverflowWarnings.length) {
+    closeHoursWarnings.unshift(`UWAGA: użyto fallbacku >1 H/dzień (${partialOverflowWarnings.length} przypadków).`);
+  } else {
+    closeHoursWarnings.unshift('Fallback >1 H/dzień: nieużyty.');
   }
 
   // Finalizacja weekendów W po ułożeniu grafiku.
