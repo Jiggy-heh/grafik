@@ -193,7 +193,7 @@
         <input type="number" id="shiftHours" min="1" max="24" value="12" style="width:60px">
       </div>
     </div>
-    <p class="help">Przy brakach kadrowych algorytm nie dodaje nadgodzin — zamiast tego redukuje obsadę, ale nie poniżej minimum (np. noc min 4, dzień min 5). Jeśli pracownik ma wyrobiony cel godzin, nie zostanie dopisany do zmiany powyżej minimum.</p>
+    <p class="help">Przy brakach kadrowych algorytm najpierw unika nadgodzin i redukuje obsadę do celu. Jeśli zagrożone jest minimum, może dopuścić niewielkie kontrolowane przekroczenie godzin pojedynczych osób (raportowane w uwagach).</p>
   </div>
 
   <div class="panel">
@@ -706,10 +706,11 @@ function generateSchedule() {
   const nightShiftMin = state.settings.nightShiftMin ?? state.settings.nightShiftCount;
   const shiftHours = state.settings.shiftHours;
   const holidays = holidaysForPeriod();
+  const allowedOvertimeForMinHours = Math.min(4, Math.round(shiftHours / 3 * 100) / 100);
 
-  // Per worker: targets. effective = base − weekday-vacation * 7.35.
-  // Split effective into fullShiftTarget (floor(eff/12)) and partialHoursTarget (reszta).
-  // Nocki dzielone po równo wśród pracowników nie-dayOnly.
+  const isWorkingShift = code => code === 'D' || code === 'N' || code === 'H';
+  const specialDayLoad = st => st.sundays + st.holidays;
+
   const targets = {};
   workers.forEach(w => {
     targets[w.id] = {
@@ -722,7 +723,7 @@ function generateSchedule() {
     ymList(state.settings.startMonth, state.settings.monthsCount).forEach(ym => {
       const base = w.hours[ym] || 0;
       const effective = effectiveMonthHours(w, ym);
-      targets[w.id].byMonth[ym] = Math.round(effective / shiftHours);
+      targets[w.id].byMonth[ym] = Math.floor(effective / shiftHours + 1e-9);
       targets[w.id].effectiveHoursByMonth[ym] = effective;
       targets[w.id].totalEffectiveHours += effective;
       targets[w.id].totalBaseHours += base;
@@ -735,32 +736,41 @@ function generateSchedule() {
     targets[w.id].totalTarget = fullShifts;
   });
 
-  // Equal night distribution among non-dayOnly workers.
-  const totalNightSlotsNeeded = dates.length * nightShiftCount;
-  const nonDayOnlyWorkers = workers.filter(w => !w.dayOnly);
   workers.forEach(w => { targets[w.id].nightTarget = 0; });
-  if (nonDayOnlyWorkers.length > 0) {
-    const basePerWorker = Math.floor(totalNightSlotsNeeded / nonDayOnlyWorkers.length);
-    const remainder = totalNightSlotsNeeded - basePerWorker * nonDayOnlyWorkers.length;
-    nonDayOnlyWorkers.forEach(w => { targets[w.id].nightTarget = basePerWorker; });
-    // Remainder goes to workers with highest capacity (fullShiftTarget)
-    const byCapacity = [...nonDayOnlyWorkers].sort((a,b) => targets[b.id].fullShiftTarget - targets[a.id].fullShiftTarget);
-    for (let i = 0; i < remainder && i < byCapacity.length; i++) {
-      targets[byCapacity[i].id].nightTarget++;
-    }
-    // Cap at worker's fullShiftTarget
+  const totalNightSlotsNeeded = dates.length * nightShiftCount;
+  const nonDayOnlyWorkers = workers.filter(w => !w.dayOnly && targets[w.id].fullShiftTarget > 0);
+  const totalNightCapacity = nonDayOnlyWorkers.reduce((s, w) => s + targets[w.id].fullShiftTarget, 0);
+  if (nonDayOnlyWorkers.length > 0 && totalNightCapacity > 0) {
+    const desired = Math.min(totalNightSlotsNeeded, totalNightCapacity);
+    let assigned = 0;
+    const fractions = [];
     nonDayOnlyWorkers.forEach(w => {
-      if (targets[w.id].nightTarget > targets[w.id].fullShiftTarget) {
-        targets[w.id].nightTarget = targets[w.id].fullShiftTarget;
-      }
+      const cap = targets[w.id].fullShiftTarget;
+      const raw = desired * (cap / totalNightCapacity);
+      const base = Math.min(cap, Math.floor(raw));
+      targets[w.id].nightTarget = base;
+      assigned += base;
+      fractions.push({ id: w.id, frac: raw - base, cap });
     });
+    let remainder = desired - assigned;
+    fractions.sort((a,b) => b.frac - a.frac || targets[b.id].fullShiftTarget - targets[a.id].fullShiftTarget);
+    while (remainder > 0) {
+      let moved = false;
+      for (const f of fractions) {
+        if (targets[f.id].nightTarget < f.cap) {
+          targets[f.id].nightTarget++;
+          remainder--;
+          moved = true;
+          if (remainder <= 0) break;
+        }
+      }
+      if (!moved) break;
+    }
   }
   workers.forEach(w => {
-    targets[w.id].dayTarget = targets[w.id].fullShiftTarget - targets[w.id].nightTarget;
+    targets[w.id].dayTarget = Math.max(0, targets[w.id].fullShiftTarget - targets[w.id].nightTarget);
   });
 
-  // Initialize schedule map { ymd: { day: [ids], night: [ids] } }
-  // and perWorker status
   const schedule = {};
   dates.forEach(d => schedule[d] = { day: [], night: [] });
 
@@ -769,217 +779,235 @@ function generateSchedule() {
     workerStatus[w.id] = {
       assignedDays: 0, assignedNights: 0,
       sundays: 0, holidays: 0,
-      byDate: {}, // 'ymd' -> 'D'|'N'|'U'|'P'|'W'
-      freeWeekends: {} // ym -> { sat: ymd, sun: ymd }
+      byDate: {},
+      freeWeekends: {},
+      preferences: {}
     };
   });
 
-  // Fill absences. U/P are hard blocks. CD/CN are shift-type preferences stored separately.
   workers.forEach(w => {
-    workerStatus[w.id].preferences = {};
     Object.entries(w.absences).forEach(([ymd, type]) => {
       if (!schedule[ymd]) return;
-      if (type === 'U' || type === 'P') {
-        workerStatus[w.id].byDate[ymd] = type;
-      } else if (type === 'CD' || type === 'CN') {
-        workerStatus[w.id].preferences[ymd] = type;
-      }
+      if (type === 'U' || type === 'P') workerStatus[w.id].byDate[ymd] = type;
+      else if (type === 'CD' || type === 'CN') workerStatus[w.id].preferences[ymd] = type;
     });
   });
 
-  // Assign free weekend per worker per month (hard block).
-  // Jeśli pracownik ma U/P w którykolwiek dzień So/Nd w miesiącu — warunek uznajemy za spełniony i nie szukamy dodatkowego weekendu.
+  const monthList = ymList(state.settings.startMonth, state.settings.monthsCount);
   const assignFreeWeekendWarnings = [];
+  const weekendCoverageWarnings = [];
+  const weekendMoveWarnings = [];
+
+  // Rezerwacja weekendu (bez twardego W w byDate na tym etapie).
   workers.forEach(w => {
-    ymList(state.settings.startMonth, state.settings.monthsCount).forEach(ym => {
+    monthList.forEach(ym => {
       const monthDates = datesInMonth(ym);
       const stBy = workerStatus[w.id].byDate;
-
-      // Czy już jest wolny weekendowy dzień (U/P) w tym miesiącu?
       const hasAbsenceOnWeekend = monthDates.some(d => isWeekend(d) && (stBy[d] === 'U' || stBy[d] === 'P'));
-      if (hasAbsenceOnWeekend) return; // spełnione przez urlop/prośbę
+      if (hasAbsenceOnWeekend) return;
 
-      // Szukaj kandydatów — pary So+Nd bez żadnego przydziału
       const candidates = [];
       for (let i = 0; i < monthDates.length - 1; i++) {
-        const sat = monthDates[i];
-        const sun = monthDates[i+1];
-        if (isSaturday(sat) && isSunday(sun)) {
-          if (!stBy[sat] && !stBy[sun]) {
-            const day = dateFromYmd(sat).getDate();
-            const score = -Math.abs(day - 15); // środek miesiąca preferowany
-            candidates.push({ sat, sun, score });
+        const sat = monthDates[i], sun = monthDates[i+1];
+        if (!isSaturday(sat) || !isSunday(sun)) continue;
+        if (stBy[sat] || stBy[sun]) continue;
+
+        let potentialLoss = 0;
+        for (const ymd of [sat, sun]) {
+          let canDoDay = 0, canDoNight = 0;
+          for (const ww of workers) {
+            const pref = workerStatus[ww.id].preferences[ymd];
+            const hard = workerStatus[ww.id].byDate[ymd];
+            if (hard === 'U' || hard === 'P') continue;
+            if (ww.id === w.id) continue;
+            if (pref !== 'CN') canDoDay++;
+            if (!ww.dayOnly && pref !== 'CD') canDoNight++;
           }
+          potentialLoss += Math.max(0, dayShiftMin - canDoDay) + Math.max(0, nightShiftMin - canDoNight);
         }
+
+        const midPref = -Math.abs(dateFromYmd(sat).getDate() - 15);
+        candidates.push({ sat, sun, score: midPref - potentialLoss * 12, risk: potentialLoss });
       }
-      if (candidates.length === 0) {
+
+      if (!candidates.length) {
         assignFreeWeekendWarnings.push(`${w.name}: brak wolnego weekendu w ${formatYm(ym)} (konflikt z urlopem/prośbą)`);
         return;
       }
-      candidates.forEach(c => {
-        let unavail = 0;
-        workers.forEach(w2 => {
-          const fw = workerStatus[w2.id].freeWeekends[ym];
-          if (fw && fw.sat === c.sat) unavail += 2;
-          const st2 = workerStatus[w2.id].byDate;
-          if (st2[c.sat] === 'U' || st2[c.sat] === 'P') unavail++;
-          if (st2[c.sun] === 'U' || st2[c.sun] === 'P') unavail++;
-        });
-        c.unavail = unavail;
-      });
-      candidates.sort((a,b) => a.unavail - b.unavail || b.score - a.score);
-      const chosen = candidates[0];
-      workerStatus[w.id].freeWeekends[ym] = { sat: chosen.sat, sun: chosen.sun };
-      stBy[chosen.sat] = 'W';
-      stBy[chosen.sun] = 'W';
+
+      candidates.sort((a,b) => b.score - a.score);
+      workerStatus[w.id].freeWeekends[ym] = { sat: candidates[0].sat, sun: candidates[0].sun, confirmed: false };
+      if (candidates[0].risk > 0) {
+        weekendCoverageWarnings.push(`${w.name}: weekend wstępnie zarezerwowany w ${formatYm(ym)} ma podwyższone ryzyko braków obsady.`);
+      }
     });
   });
 
-  // Now iterate through each date and assign shifts
+  const partialHoursByWorker = {};
+  workers.forEach(w => partialHoursByWorker[w.id] = 0);
+  const getAssignedHoursForWorker = wId => {
+    const st = workerStatus[wId];
+    return (st.assignedDays + st.assignedNights) * shiftHours + (partialHoursByWorker[wId] || 0);
+  };
+
+  function isReservedWeekendDay(wId, ymd) {
+    const ym = ymd.slice(0, 7);
+    const fw = workerStatus[wId].freeWeekends[ym];
+    return !!(fw && (fw.sat === ymd || fw.sun === ymd));
+  }
+
+  // Jedno źródło prawdy dla walidacji przydziałów (initial, swapy, rebalance, H).
+  function canAssignShift(wId, ymd, shift, opts = {}) {
+    const st = workerStatus[wId];
+    const w = workers.find(x => x.id === wId);
+    const { ignoreReservation = false } = opts;
+    const cur = st.byDate[ymd];
+
+    if (isWorkingShift(cur) || cur === 'U' || cur === 'P' || cur === 'W') return false;
+    if (!ignoreReservation && isReservedWeekendDay(wId, ymd)) return false;
+
+    if (shift === 'N' && w.dayOnly) return false;
+    const pref = st.preferences[ymd];
+    if (pref === 'CD' && shift === 'N') return false;
+    if (pref === 'CN' && shift === 'D') return false;
+
+    const dObj = dateFromYmd(ymd);
+    const off = n => ymdFromDate(new Date(dObj.getTime() + n * 86400000));
+    const yS = st.byDate[off(-1)], eS = st.byDate[off(-2)], tS = st.byDate[off(+1)], fS = st.byDate[off(+2)];
+
+    if (isSaturday(ymd) && isWorkingShift(tS)) return false;
+    if (isSunday(ymd) && isWorkingShift(yS)) return false;
+
+    if (yS === 'N' && shift === 'D') return false;
+    if (shift === 'N' && tS === 'D') return false;
+
+    if (isWorkingShift(eS) && isWorkingShift(yS)) return false;
+    if (isWorkingShift(yS) && isWorkingShift(tS)) return false;
+    if (isWorkingShift(tS) && isWorkingShift(fS)) return false;
+
+    if (shift === 'N') {
+      if (yS === 'N' && eS === 'N') return false;
+      if (yS === 'N' && tS === 'N') return false;
+      if (tS === 'N' && fS === 'N') return false;
+    }
+    return true;
+  }
+
+  function scoreWorkerForShift(wId, ymd, shift) {
+    const st = workerStatus[wId];
+    const t = targets[wId];
+    const w = workers.find(x => x.id === wId);
+    let score = 0;
+
+    const pref = st.preferences[ymd];
+    if (pref === 'CD' && shift === 'D') score += 5200;
+    if (pref === 'CN' && shift === 'N') score += 5200;
+
+    const deficit = shift === 'D' ? (t.dayTarget - st.assignedDays) : (t.nightTarget - st.assignedNights);
+    if (deficit > 0) score += deficit * 85 + 50;
+    else if (deficit < 0) score += deficit * 220;
+
+    if (!w.dayOnly) {
+      const nMinusD = st.assignedNights - st.assignedDays;
+      if (shift === 'D' && nMinusD > 0) score += nMinusD * 24;
+      if (shift === 'N' && nMinusD < 0) score += (-nMinusD) * 24;
+    }
+
+    score += (t.totalEffectiveHours - getAssignedHoursForWorker(wId)) * 2.8;
+
+    if ((isSunday(ymd) || holidays[ymd]) && shift === 'D') {
+      const avg = workers.reduce((s,x) => s + specialDayLoad(workerStatus[x.id]), 0) / workers.length;
+      score += (avg - specialDayLoad(st)) * 18;
+    }
+
+    const dObj = dateFromYmd(ymd);
+    const off = n => ymdFromDate(new Date(dObj.getTime() + n * 86400000));
+    const yS = st.byDate[off(-1)], eS = st.byDate[off(-2)];
+
+    // Silniejszy rytm D->N->W/W
+    if (shift === 'N' && yS === 'D') score += 650;
+    if (shift === 'D' && yS === 'D') score -= 2600;
+    if (shift === 'N' && yS === 'N') score -= 260;
+    if ((shift === 'D' || shift === 'N') && yS === 'N') score -= 1200;
+    if (isWorkingShift(yS) && isWorkingShift(eS)) score -= 900;
+
+    let priorRest = 0;
+    for (let i = 1; i <= 5; i++) {
+      const s = st.byDate[off(-i)];
+      if (isWorkingShift(s)) break;
+      priorRest++;
+    }
+    if (priorRest >= 4) score += 1800;
+    else if (priorRest >= 3) score += 180;
+
+    if (isReservedWeekendDay(wId, ymd)) score -= 500;
+
+    return score;
+  }
+
   const schedulingWarnings = [];
+  const overtimeWarnings = [];
+
+  function pickWorkers(ymd, pool, shift, target, min) {
+    const candidates = pool
+      .filter(w => canAssignShift(w.id, ymd, shift, { ignoreReservation: false }))
+      .sort((a,b) => scoreWorkerForShift(b.id, ymd, shift) - scoreWorkerForShift(a.id, ymd, shift));
+
+    const picks = [];
+    const softOt = [];
+
+    for (const w of candidates) {
+      if (picks.length >= target) break;
+      const nextHours = getAssignedHoursForWorker(w.id) + shiftHours;
+      if (nextHours <= targets[w.id].totalEffectiveHours + 0.01) picks.push(w);
+    }
+
+    if (picks.length < min) {
+      const pickedIds = new Set(picks.map(x => x.id));
+
+      const reservedFallback = pool
+        .filter(w => !pickedIds.has(w.id) && canAssignShift(w.id, ymd, shift, { ignoreReservation: true }))
+        .sort((a,b) => scoreWorkerForShift(b.id, ymd, shift) - scoreWorkerForShift(a.id, ymd, shift));
+
+      for (const w of reservedFallback) {
+        if (picks.length >= min) break;
+        const nextHours = getAssignedHoursForWorker(w.id) + shiftHours;
+        if (nextHours <= targets[w.id].totalEffectiveHours + 0.01) picks.push(w);
+      }
+
+      const pickedAfterRes = new Set(picks.map(x => x.id));
+      const overtimeFallback = pool
+        .filter(w => !pickedAfterRes.has(w.id) && canAssignShift(w.id, ymd, shift, { ignoreReservation: true }))
+        .map(w => {
+          const nextHours = getAssignedHoursForWorker(w.id) + shiftHours;
+          return { w, over: nextHours - targets[w.id].totalEffectiveHours };
+        })
+        .filter(x => x.over <= allowedOvertimeForMinHours + 0.01)
+        .sort((a,b) => a.over - b.over || scoreWorkerForShift(b.w.id, ymd, shift) - scoreWorkerForShift(a.w.id, ymd, shift));
+
+      for (const cand of overtimeFallback) {
+        if (picks.length >= min) break;
+        picks.push(cand.w);
+        softOt.push({ id: cand.w.id, over: cand.over });
+      }
+    }
+
+    return { picks, softOt };
+  }
 
   for (const ymd of dates) {
-    const dateObj = dateFromYmd(ymd);
     const isSun = isSunday(ymd);
     const isHol = !!holidays[ymd];
 
-    // Helper: check if worker can work a given shift type today
-    function canWork(w, shift) {
-      const st = workerStatus[w.id];
-      const cur = st.byDate[ymd];
-      if (cur === 'U' || cur === 'P' || cur === 'W' || cur === 'D' || cur === 'N' || cur === 'H') return false;
-
-      // dayOnly — nigdy N
-      if (shift === 'N' && w.dayOnly) return false;
-
-      // Shift-type preferences: CD forbids N, CN forbids D
-      const pref = st.preferences[ymd];
-      if (pref === 'CD' && shift === 'N') return false;
-      if (pref === 'CN' && shift === 'D') return false;
-
-      const isWork = s => s === 'D' || s === 'N' || s === 'H';
-
-      // Zasada weekendowa: nie można pracować So + Nd tego samego weekendu
-      if (isSaturday(ymd)) {
-        const sun = ymdFromDate(new Date(dateObj.getTime() + 86400000));
-        if (isWork(st.byDate[sun])) return false;
-      }
-      if (isSunday(ymd)) {
-        const sat = ymdFromDate(new Date(dateObj.getTime() - 86400000));
-        if (isWork(st.byDate[sat])) return false;
-      }
-
-      // previous day (yesterday)
-      const yest = ymdFromDate(new Date(dateObj.getTime() - 86400000));
-      const yShift = st.byDate[yest];
-
-      // Rule: after N yesterday, cannot D today
-      if (yShift === 'N' && shift === 'D') return false;
-
-      // Rule: max 2 shifts in a row (any combination of D/N on consecutive days)
-      const ereyest = ymdFromDate(new Date(dateObj.getTime() - 2*86400000));
-      const eShift = st.byDate[ereyest];
-      if (isWork(yShift) && isWork(eShift)) return false; // would be 3rd in a row
-
-      // Rule: max 2 nights in a row
-      if (shift === 'N' && yShift === 'N') {
-        if (eShift === 'N') return false;
-      }
-      return true;
-    }
-
-    // Score a worker for a shift
-    function scoreWorker(w, shift) {
-      const st = workerStatus[w.id];
-      const t = targets[w.id];
-      let score = 0;
-
-      // Max priority: CD/CN preference match
-      const pref = st.preferences[ymd];
-      if (pref === 'CD' && shift === 'D') score += 5000;
-      if (pref === 'CN' && shift === 'N') score += 5000;
-
-      // PRIMARY: shift-type deficit (D/N balance).
-      const deficit = (shift === 'D')
-        ? (t.dayTarget - st.assignedDays)
-        : (t.nightTarget - st.assignedNights);
-      if (deficit > 0) score += deficit * 80 + 60;
-      else if (deficit < 0) score += deficit * 250;
-
-      // Secondary: internal D/N symmetry — tylko dla pracowników nie-dayOnly
-      if (!w.dayOnly) {
-        const nMinusD = st.assignedNights - st.assignedDays;
-        if (shift === 'D' && nMinusD > 0) score += nMinusD * 20;
-        if (shift === 'N' && nMinusD < 0) score += (-nMinusD) * 20;
-      }
-
-      // Tertiary: hours deficit względem PEŁNYCH zmian (partial dopełnia resztę post-pass)
-      const hoursAssigned = (st.assignedDays + st.assignedNights) * shiftHours;
-      const fullTargetH = t.fullShiftTarget * shiftHours;
-      const hoursDeficit = fullTargetH - hoursAssigned;
-      score += hoursDeficit * 3;
-
-      // Połączona pula: niedziele + święta (tylko D, bez nocek)
-      if ((isSun || isHol) && shift === 'D') {
-        const avgSunHol = workers.reduce((s,x) => s + workerStatus[x.id].sundays + workerStatus[x.id].holidays, 0) / workers.length;
-        const own = st.sundays + st.holidays;
-        score += (avgSunHol - own) * 15;
-      }
-
-      // Bonus po długiej przerwie — unikamy 5+ dni wolnego
-      let priorRest = 0;
-      for (let i = 1; i <= 5; i++) {
-        const d = ymdFromDate(new Date(dateObj.getTime() - i*86400000));
-        const s = st.byDate[d];
-        if (s === 'D' || s === 'N' || s === 'H') break;
-        priorRest++;
-      }
-      if (priorRest >= 4) score += 2000;      // prawie/już 5 wolnych — trzeba przerwać
-      else if (priorRest >= 3) score += 120;
-
-      // Pattern D→N→O→O — strongly preferred cycle
-      const yest = ymdFromDate(new Date(dateObj.getTime() - 86400000));
-      const ereyest = ymdFromDate(new Date(dateObj.getTime() - 2*86400000));
-      const yShift = st.byDate[yest];
-      const eShift = st.byDate[ereyest];
-      const isRest = s => s !== 'D' && s !== 'N' && s !== 'H';
-
-      if (shift === 'N' && yShift === 'D') score += 300;       // D→N — preferred step
-      if (shift === 'D' && yShift === 'D') score -= 1500;      // D→D — strongly avoid
-      if (shift === 'N' && yShift === 'N') score -= 60;        // N→N — avoid unless must
-      if (shift === 'D' && isRest(yShift) && isRest(eShift)) score += 40;
-      if (isRest(yShift) && eShift === 'N') score -= 20;
-
-      return score;
-    }
-
-    // Picks workers for a shift respecting:
-    //  - target: desired headcount
-    //  - min: minimum headcount (may go below only when physically impossible)
-    //  - no-overtime rule: once picks >= min, skip candidates who would exceed their target hours
-    function pickWorkers(pool, shift, target, min) {
-      const candidates = pool.filter(w => canWork(w, shift));
-      candidates.sort((a,b) => scoreWorker(b, shift) - scoreWorker(a, shift));
-      const picks = [];
-      for (const w of candidates) {
-        if (picks.length >= target) break;
-        const st = workerStatus[w.id];
-        const t = targets[w.id];
-        const hoursAssigned = (st.assignedDays + st.assignedNights) * shiftHours;
-        // Overtime = przekroczenie pełnych zmian (partial hours dopełniamy post-pass)
-        const wouldOvertime = hoursAssigned + shiftHours > t.fullShiftTarget * shiftHours + 0.01;
-        if (picks.length >= min && wouldOvertime) continue;
-        picks.push(w);
-      }
-      return picks;
-    }
-
-    // Night first (protected)
-    const nightPicks = pickWorkers(workers, 'N', nightShiftCount, nightShiftMin);
+    const nightRes = pickWorkers(ymd, workers, 'N', nightShiftCount, nightShiftMin);
+    const nightPicks = nightRes.picks;
     if (nightPicks.length < nightShiftMin) {
       schedulingWarnings.push(`${ymd}: na noc dostępnych tylko ${nightPicks.length}/${nightShiftMin} osób (poniżej minimum!)`);
     } else if (nightPicks.length < nightShiftCount) {
-      schedulingWarnings.push(`${ymd}: zredukowana obsada nocy do ${nightPicks.length}/${nightShiftCount} (brak kadry bez nadgodzin)`);
+      schedulingWarnings.push(`${ymd}: zredukowana obsada nocy do ${nightPicks.length}/${nightShiftCount} (brak kadry do targetu)`);
+    }
+    if (nightRes.softOt.length) {
+      nightRes.softOt.forEach(x => overtimeWarnings.push(`${ymd}: ${workers.find(w => w.id === x.id).name} +${formatDecimal(Math.round(x.over*100)/100)}h (noc, dla minimum)`));
     }
     nightPicks.forEach(w => {
       workerStatus[w.id].byDate[ymd] = 'N';
@@ -989,13 +1017,16 @@ function generateSchedule() {
       schedule[ymd].night.push(w.id);
     });
 
-    // Day shift
     const remainingForDay = workers.filter(w => !nightPicks.includes(w));
-    const dayPicks = pickWorkers(remainingForDay, 'D', dayShiftCount, dayShiftMin);
+    const dayRes = pickWorkers(ymd, remainingForDay, 'D', dayShiftCount, dayShiftMin);
+    const dayPicks = dayRes.picks;
     if (dayPicks.length < dayShiftMin) {
       schedulingWarnings.push(`${ymd}: na dzień dostępnych tylko ${dayPicks.length}/${dayShiftMin} osób (poniżej minimum!)`);
     } else if (dayPicks.length < dayShiftCount) {
-      schedulingWarnings.push(`${ymd}: zredukowana obsada dnia do ${dayPicks.length}/${dayShiftCount} (brak kadry bez nadgodzin)`);
+      schedulingWarnings.push(`${ymd}: zredukowana obsada dnia do ${dayPicks.length}/${dayShiftCount} (brak kadry do targetu)`);
+    }
+    if (dayRes.softOt.length) {
+      dayRes.softOt.forEach(x => overtimeWarnings.push(`${ymd}: ${workers.find(w => w.id === x.id).name} +${formatDecimal(Math.round(x.over*100)/100)}h (dzień, dla minimum)`));
     }
     dayPicks.forEach(w => {
       workerStatus[w.id].byDate[ymd] = 'D';
@@ -1006,7 +1037,6 @@ function generateSchedule() {
     });
   }
 
-  // ===== Rebalance pass: move shifts from over-target to under-target workers =====
   function assign(wId, ymd, shift) {
     const st = workerStatus[wId];
     st.byDate[ymd] = shift;
@@ -1030,36 +1060,10 @@ function generateSchedule() {
     if (idx >= 0) arr.splice(idx, 1);
   }
   function canAddStrict(wId, ymd, shift) {
-    const st = workerStatus[wId];
-    if (st.byDate[ymd]) return false;
-    const w = workers.find(x => x.id === wId);
-    if (shift === 'N' && w && w.dayOnly) return false;
-    const pref = st.preferences[ymd];
-    if (pref === 'CD' && shift === 'N') return false;
-    if (pref === 'CN' && shift === 'D') return false;
-    const dObj = dateFromYmd(ymd);
-    const off = n => ymdFromDate(new Date(dObj.getTime() + n*86400000));
-    const yS = st.byDate[off(-1)], eS = st.byDate[off(-2)], tS = st.byDate[off(+1)], fS = st.byDate[off(+2)];
-    const isWk = s => s === 'D' || s === 'N' || s === 'H';
-    // Zasada weekendowa: nie można pracować So + Nd tego samego weekendu
-    if (isSaturday(ymd) && isWk(tS)) return false;
-    if (isSunday(ymd) && isWk(yS)) return false;
-    if (yS === 'N' && shift === 'D') return false;
-    if (shift === 'N' && tS === 'D') return false;
-    if (isWk(eS) && isWk(yS)) return false;
-    if (isWk(yS) && isWk(tS)) return false;
-    if (isWk(tS) && isWk(fS)) return false;
-    if (shift === 'N') {
-      if (yS === 'N' && eS === 'N') return false;
-      if (yS === 'N' && tS === 'N') return false;
-      if (tS === 'N' && fS === 'N') return false;
-    }
-    return true;
+    return canAssignShift(wId, ymd, shift, { ignoreReservation: true });
   }
   function workerDelta(wId) {
-    const st = workerStatus[wId];
-    // Rebalansujemy względem pełnych zmian — partial dopełnia resztę w osobnym post-passie
-    return (st.assignedDays + st.assignedNights) * shiftHours - targets[wId].fullShiftTarget * shiftHours;
+    return getAssignedHoursForWorker(wId) - targets[wId].totalEffectiveHours;
   }
 
   let rebalanceSwaps = 0;
@@ -1092,17 +1096,12 @@ function generateSchedule() {
     if (!swapped) break;
   }
 
-  // D/N swap rebalance: equalize D vs N internally per worker (pomijamy dayOnly)
   let dnSwaps = 0;
   for (let iter = 0; iter < 400 && dnSwaps < 300; iter++) {
-    const stats = workers.filter(w => !w.dayOnly).map(w => {
-      const st = workerStatus[w.id];
-      return { id: w.id, diff: st.assignedDays - st.assignedNights };
-    });
+    const stats = workers.filter(w => !w.dayOnly).map(w => ({ id: w.id, diff: workerStatus[w.id].assignedDays - workerStatus[w.id].assignedNights }));
     if (stats.length < 2) break;
     stats.sort((a,b) => b.diff - a.diff);
-    const A = stats[0];
-    const B = stats[stats.length - 1];
+    const A = stats[0], B = stats[stats.length - 1];
     if (A.id === B.id || A.diff - B.diff < 2) break;
 
     let found = false;
@@ -1129,23 +1128,20 @@ function generateSchedule() {
     if (!found) break;
   }
 
-  // ===== Rebalance: równa liczba nocek wśród pracowników nie-dayOnly (±1) =====
   let nightBalanceSwaps = 0;
   for (let iter = 0; iter < 400 && nightBalanceSwaps < 200; iter++) {
-    const stats = workers.filter(w => !w.dayOnly).map(w => ({ id: w.id, nights: workerStatus[w.id].assignedNights }));
+    const stats = workers.filter(w => !w.dayOnly).map(w => ({ id: w.id, nights: workerStatus[w.id].assignedNights, cap: targets[w.id].fullShiftTarget }));
     if (stats.length < 2) break;
-    stats.sort((a,b) => b.nights - a.nights);
+    stats.sort((a,b) => b.nights - a.nights || a.cap - b.cap);
     const hi = stats[0], lo = stats[stats.length - 1];
     if (hi.nights - lo.nights < 2) break;
 
-    // Szukamy: hi ma N w dniu X, lo ma D w dniu Y (lub wolne w Y). Zamieniamy: hi dostaje D w Y (lub nic, jeśli lo miał wolne), lo dostaje N w X.
     let found = false;
     for (const dN of dates) {
       if (workerStatus[hi.id].byDate[dN] !== 'N') continue;
       for (const dD of dates) {
         if (dD === dN) continue;
-        const loShift = workerStatus[lo.id].byDate[dD];
-        if (loShift !== 'D') continue;
+        if (workerStatus[lo.id].byDate[dD] !== 'D') continue;
         unassign(hi.id, dN);
         unassign(lo.id, dD);
         if (canAddStrict(hi.id, dD, 'D') && canAddStrict(lo.id, dN, 'N')) {
@@ -1164,26 +1160,20 @@ function generateSchedule() {
     if (!found) break;
   }
 
-  // ===== Rebalance: pula niedziele+święta (tylko D) =====
-  const isSunOrHol = ymd => isSunday(ymd) || !!holidays[ymd];
-  function sunHolCount(wId) {
-    return workers.some(w => w.id === wId) ? (workerStatus[wId].sundays + workerStatus[wId].holidays) : 0;
-  }
+  const isSunOrHol = d => isSunday(d) || !!holidays[d];
   let sunHolSwaps = 0;
   for (let iter = 0; iter < 400 && sunHolSwaps < 200; iter++) {
-    const stats = workers.map(w => ({ id: w.id, n: sunHolCount(w.id) }));
+    const stats = workers.map(w => ({ id: w.id, n: specialDayLoad(workerStatus[w.id]) }));
     stats.sort((a,b) => b.n - a.n);
     const hi = stats[0], lo = stats[stats.length - 1];
     if (hi.id === lo.id || hi.n - lo.n < 2) break;
 
-    // hi oddaje D w niedzielę/święto, lo bierze; w zamian lo oddaje D w dzień powszedni, hi bierze
     let found = false;
     for (const dHol of dates) {
       if (!isSunOrHol(dHol)) continue;
       if (workerStatus[hi.id].byDate[dHol] !== 'D') continue;
       for (const dWeek of dates) {
-        if (dWeek === dHol) continue;
-        if (isSunOrHol(dWeek)) continue;
+        if (dWeek === dHol || isSunOrHol(dWeek)) continue;
         if (workerStatus[lo.id].byDate[dWeek] !== 'D') continue;
         unassign(hi.id, dHol);
         unassign(lo.id, dWeek);
@@ -1203,7 +1193,6 @@ function generateSchedule() {
     if (!found) break;
   }
 
-  // ===== Post-pass: max 4 dni wolnego pod rząd =====
   const longRestWarnings = [];
   function findLongRestRun(wId) {
     let runStart = -1;
@@ -1211,7 +1200,7 @@ function generateSchedule() {
     for (let i = 0; i <= dates.length; i++) {
       const d = dates[i];
       const s = d ? workerStatus[wId].byDate[d] : 'X';
-      const isRest = !s || !(['D','N','H'].includes(s));
+      const isRest = !s || !isWorkingShift(s);
       if (isRest && d) {
         if (runStart === -1) runStart = i;
       } else {
@@ -1224,36 +1213,30 @@ function generateSchedule() {
     }
     return best;
   }
+
   workers.forEach(w => {
     for (let tries = 0; tries < 6; tries++) {
       const run = findLongRestRun(w.id);
       if (!run) break;
-      // Spróbuj wstawić D w środek ciągu — przez swap z kimś, kto ma nadmiar lub może zrezygnować bez naruszeń
       const midIdx = run.start + Math.floor(run.length / 2);
       let done = false;
       for (let off = 0; off < run.length && !done; off++) {
         const idx = midIdx + (off % 2 === 0 ? off/2 : -(off+1)/2 | 0);
         if (idx < run.start || idx >= run.start + run.length) continue;
         const ymd = dates[idx];
-        // Jeśli obsada D < limit, po prostu dodaj D
         if (schedule[ymd].day.length < dayShiftCount && canAddStrict(w.id, ymd, 'D')) {
           assign(w.id, ymd, 'D');
           done = true; break;
         }
-        // Spróbuj podmienić z pracownikiem mającym D tego dnia
         const dayOccupants = [...schedule[ymd].day];
         for (const otherId of dayOccupants) {
           if (otherId === w.id) continue;
-          // Jeśli podmiana daje "innej osobie" mniejsze odchylenie od targetu — swap
-          const otherOver = workerDelta(otherId) > 0.01;
-          if (!otherOver) continue;
+          if (workerDelta(otherId) <= 0.01) continue;
           unassign(otherId, ymd);
           if (canAddStrict(w.id, ymd, 'D')) {
             assign(w.id, ymd, 'D');
             done = true; break;
-          } else {
-            assign(otherId, ymd, 'D');
-          }
+          } else assign(otherId, ymd, 'D');
         }
       }
       if (!done) {
@@ -1263,66 +1246,107 @@ function generateSchedule() {
     }
   });
 
-  // ===== Post-pass: częściowe dniówki (kod 'H') =====
-  const partialHoursMap = {}; // ymd -> { wId -> hours }
+  const partialHoursMap = {};
   const partialWarnings = [];
-  workers.forEach(w => {
-    const t = targets[w.id];
-    if (t.partialHoursTarget < 0.5) return; // brak reszty do uzupełnienia
-    const remaining = t.partialHoursTarget;
 
-    // Znajdź dzień: bez przydziału, canAddStrict('D'), obsada D < limit
+  function pickBestPartialDay(wId, remainingHours) {
+    const pref = workerStatus[wId].preferences;
     const candidates = [];
     for (const ymd of dates) {
-      if (workerStatus[w.id].byDate[ymd]) continue;
+      if (workerStatus[wId].byDate[ymd]) continue;
+      if (pref[ymd] === 'CN') continue;
       if (schedule[ymd].day.length >= dayShiftCount) continue;
-      if (!canAddStrict(w.id, ymd, 'D')) continue;
-      let score = 0;
-      if (isWeekend(ymd)) score -= 100;
+      if (!canAddStrict(wId, ymd, 'D')) continue;
+      if (getAssignedHoursForWorker(wId) + remainingHours > targets[wId].totalEffectiveHours + 0.01) continue;
+
+      let score = scoreWorkerForShift(wId, ymd, 'D');
+      if (pref[ymd] === 'CD') score += 220;
+      if (isWeekend(ymd)) score -= 120;
       if (holidays[ymd]) score -= 80;
-      // Preferuj dni o niskiej obsadzie D (rozłożenie)
-      score += (dayShiftCount - schedule[ymd].day.length) * 5;
+      score += (dayShiftCount - schedule[ymd].day.length) * 8;
+
+      const dObj = dateFromYmd(ymd);
+      const prev = ymdFromDate(new Date(dObj.getTime() - 86400000));
+      const next = ymdFromDate(new Date(dObj.getTime() + 86400000));
+      if (workerStatus[wId].byDate[prev] === 'N') score -= 1000;
+      if (workerStatus[wId].byDate[next] === 'N') score += 60; // dobrze zamknąć D->N
+
       candidates.push({ ymd, score });
     }
-    if (candidates.length === 0) {
+    if (!candidates.length) return null;
+    candidates.sort((a,b) => b.score - a.score);
+    return candidates[0].ymd;
+  }
+
+  workers.forEach(w => {
+    const remaining = Math.round((targets[w.id].partialHoursTarget || 0) * 100) / 100;
+    if (remaining <= 0.01) return;
+    const picked = pickBestPartialDay(w.id, remaining);
+    if (!picked) {
       partialWarnings.push(`${w.name}: nie udało się przydzielić częściowej dniówki (${formatDecimal(remaining)} h brakuje)`);
       return;
     }
-    candidates.sort((a,b) => b.score - a.score);
-    const picked = candidates[0].ymd;
-    // Przydziel H — nie rusza sundays/holidays (to pełna D-fairness), bo H to częściowa
     workerStatus[w.id].byDate[picked] = 'H';
     schedule[picked].day.push(w.id);
     if (!partialHoursMap[picked]) partialHoursMap[picked] = {};
     partialHoursMap[picked][w.id] = remaining;
+    partialHoursByWorker[w.id] = Math.round((partialHoursByWorker[w.id] + remaining) * 100) / 100;
   });
 
-  // Diagnostic: supply vs demand
+  // Finalizacja weekendów W po ułożeniu grafiku.
+  workers.forEach(w => {
+    monthList.forEach(ym => {
+      const monthDates = datesInMonth(ym);
+      const stBy = workerStatus[w.id].byDate;
+      const hasAbsenceOnWeekend = monthDates.some(d => isWeekend(d) && (stBy[d] === 'U' || stBy[d] === 'P'));
+      if (hasAbsenceOnWeekend) return;
+
+      const reserved = workerStatus[w.id].freeWeekends[ym];
+      const weekendIsFree = pair => pair && !isWorkingShift(stBy[pair.sat]) && !isWorkingShift(stBy[pair.sun]) && stBy[pair.sat] !== 'U' && stBy[pair.sat] !== 'P' && stBy[pair.sun] !== 'U' && stBy[pair.sun] !== 'P';
+
+      let chosen = null;
+      if (weekendIsFree(reserved)) {
+        chosen = { sat: reserved.sat, sun: reserved.sun };
+      } else {
+        const options = [];
+        for (let i = 0; i < monthDates.length - 1; i++) {
+          const sat = monthDates[i], sun = monthDates[i+1];
+          if (!isSaturday(sat) || !isSunday(sun)) continue;
+          if (weekendIsFree({ sat, sun })) {
+            const center = reserved ? dateFromYmd(reserved.sat).getDate() : 15;
+            options.push({ sat, sun, score: -Math.abs(dateFromYmd(sat).getDate() - center) });
+          }
+        }
+        if (options.length) {
+          options.sort((a,b) => b.score - a.score);
+          chosen = { sat: options[0].sat, sun: options[0].sun };
+          if (reserved) weekendMoveWarnings.push(`${w.name}: weekend wolny w ${formatYm(ym)} przeniesiono z ${reserved.sat}/${reserved.sun} na ${chosen.sat}/${chosen.sun}.`);
+        }
+      }
+
+      if (chosen) {
+        stBy[chosen.sat] = stBy[chosen.sat] || 'W';
+        stBy[chosen.sun] = stBy[chosen.sun] || 'W';
+        workerStatus[w.id].freeWeekends[ym] = { sat: chosen.sat, sun: chosen.sun, confirmed: true };
+      } else {
+        weekendCoverageWarnings.push(`${w.name}: nie udało się zatwierdzić pełnego wolnego weekendu w ${formatYm(ym)} bez naruszenia innych ograniczeń.`);
+      }
+    });
+  });
+
   const totalDemandH = dates.length * (dayShiftCount + nightShiftCount) * shiftHours;
   const totalSupplyH = workers.reduce((s,w) => s + targets[w.id].totalEffectiveHours, 0);
   const balanceWarnings = [];
   if (totalSupplyH - totalDemandH >= shiftHours - 0.01) {
     balanceWarnings.push(`Cel pracowników (${Math.round(totalSupplyH)} h) przewyższa zapotrzebowanie (${Math.round(totalDemandH)} h) o ${Math.round(totalSupplyH - totalDemandH)} h — matematycznie niektórzy pracownicy będą pod celem.`);
   } else if (totalDemandH - totalSupplyH >= shiftHours - 0.01) {
-    balanceWarnings.push(`Zapotrzebowanie (${Math.round(totalDemandH)} h) przewyższa cel pracowników (${Math.round(totalSupplyH)} h) o ${Math.round(totalDemandH - totalSupplyH)} h — zamiast nadgodzin algorytm zredukuje obsadę (nie poniżej minimum).`);
+    balanceWarnings.push(`Zapotrzebowanie (${Math.round(totalDemandH)} h) przewyższa cel pracowników (${Math.round(totalSupplyH)} h) o ${Math.round(totalDemandH - totalSupplyH)} h — możliwe redukcje obsady lub kontrolowane lekkie nadgodziny do minimum.`);
   }
 
-  // Build per-worker schedule view
   const workerSchedule = {};
   workers.forEach(w => {
     workerSchedule[w.id] = {};
-    dates.forEach(d => {
-      workerSchedule[w.id][d] = workerStatus[w.id].byDate[d] || '';
-    });
-  });
-
-  // Suma godzin partial per pracownik (jedna H na pracownika, ale zliczamy bezpiecznie)
-  const partialHoursByWorker = {};
-  workers.forEach(w => { partialHoursByWorker[w.id] = 0; });
-  Object.entries(partialHoursMap).forEach(([ymd, byW]) => {
-    Object.entries(byW).forEach(([wId, h]) => {
-      partialHoursByWorker[wId] = (partialHoursByWorker[wId] || 0) + h;
-    });
+    dates.forEach(d => workerSchedule[w.id][d] = workerStatus[w.id].byDate[d] || '');
   });
 
   state.schedule = {
@@ -1342,8 +1366,8 @@ function generateSchedule() {
       partialHours: Math.round((partialHoursByWorker[w.id] || 0) * 100) / 100,
       sundays: workerStatus[w.id].sundays,
       holidays: workerStatus[w.id].holidays,
-      sunHolDays: workerStatus[w.id].sundays + workerStatus[w.id].holidays,
-      totalHours: Math.round(((workerStatus[w.id].assignedDays + workerStatus[w.id].assignedNights) * shiftHours + (partialHoursByWorker[w.id] || 0)) * 100) / 100,
+      sunHolDays: specialDayLoad(workerStatus[w.id]),
+      totalHours: Math.round((getAssignedHoursForWorker(w.id)) * 100) / 100,
       fullShiftHours: (workerStatus[w.id].assignedDays + workerStatus[w.id].assignedNights) * shiftHours,
       targetHours: targets[w.id].totalEffectiveHours,
       baseHours: targets[w.id].totalBaseHours,
@@ -1352,22 +1376,33 @@ function generateSchedule() {
   };
   saveState();
 
-  // Check unfulfilled CD/CN preferences
   const prefWarnings = [];
+  let prefMet = 0, prefUnmet = 0;
   workers.forEach(w => {
     const prefs = workerStatus[w.id].preferences || {};
     Object.entries(prefs).forEach(([ymd, pref]) => {
       const actual = workerStatus[w.id].byDate[ymd];
-      const want = pref === 'CD' ? 'D' : 'N';
-      if (actual !== want) {
+      const wanted = pref === 'CD' ? ['D','H'] : ['N'];
+      if (wanted.includes(actual)) prefMet++;
+      else {
+        prefUnmet++;
         const label = pref === 'CD' ? 'dniówkę' : 'nockę';
         prefWarnings.push(`${w.name} (${ymd}): prośba o ${label} nie została spełniona`);
       }
     });
   });
 
-  // Display messages
-  const allWarnings = [...balanceWarnings, ...assignFreeWeekendWarnings, ...schedulingWarnings, ...longRestWarnings, ...partialWarnings, ...prefWarnings];
+  const allWarnings = [
+    ...balanceWarnings,
+    ...assignFreeWeekendWarnings,
+    ...weekendCoverageWarnings,
+    ...weekendMoveWarnings,
+    ...schedulingWarnings,
+    ...longRestWarnings,
+    ...partialWarnings,
+    ...overtimeWarnings,
+    ...prefWarnings
+  ];
   if (rebalanceSwaps > 0 || dnSwaps > 0 || nightBalanceSwaps > 0 || sunHolSwaps > 0) {
     const parts = [];
     if (rebalanceSwaps > 0) parts.push(`${rebalanceSwaps} zamian godzinowych`);
@@ -1376,11 +1411,13 @@ function generateSchedule() {
     if (sunHolSwaps > 0) parts.push(`${sunHolSwaps} zamian nd/święta`);
     allWarnings.unshift(`Wyrównano grafik (${parts.join(', ')}).`);
   }
-  if (allWarnings.length === 0) {
+  allWarnings.unshift(`Preferencje CD/CN: spełnione ${prefMet}, niespełnione ${prefUnmet}.`);
+
+  if (allWarnings.length === 1) {
     showSuccess('Grafik wygenerowany pomyślnie. Sprawdź statystyki pod grafikiem.');
   } else {
-    const msg = allWarnings.slice(0, 15).map(m => '• ' + m).join('<br>');
-    showWarning(`Grafik wygenerowany, ale z uwagami (${allWarnings.length}):<br>${msg}${allWarnings.length > 15 ? '<br>…i więcej' : ''}`);
+    const msg = allWarnings.slice(0, 20).map(m => '• ' + m).join('<br>');
+    showWarning(`Grafik wygenerowany, ale z uwagami (${allWarnings.length - 1}):<br>${msg}${allWarnings.length > 20 ? '<br>…i więcej' : ''}`);
   }
 
   populateScheduleSelectors();
